@@ -1,4 +1,5 @@
 from pathlib import Path
+import sqlite3
 from uuid import uuid4
 
 from trading_dashboard.cli import main
@@ -37,6 +38,22 @@ def test_mock_update_creates_db_and_html():
     assert "sector-heatmap" in html
     assert "sparkline" in html
     assert "syncFilterOptions" in html
+    assert "&gt; SMA200" in html
+    breadth = pages / "breadth.html"
+    assert breadth.exists()
+    breadth_html = breadth.read_text(encoding="utf-8")
+    assert "Breadth History" in breadth_html
+    assert "&gt; SMA200" in breadth_html
+    with sqlite3.connect(db) as conn:
+        conn.row_factory = sqlite3.Row
+        count = conn.execute("SELECT COUNT(*) AS n FROM breadth_daily").fetchone()["n"]
+        latest = conn.execute(
+            "SELECT pct_above_sma50, pct_above_sma200, valid_sma50 FROM breadth_daily ORDER BY date DESC LIMIT 1"
+        ).fetchone()
+    assert count > 0
+    assert latest["pct_above_sma50"] is not None
+    assert latest["pct_above_sma200"] is not None
+    assert latest["valid_sma50"] == 2
 
 
 def test_scanner_filter_markup_is_rendered():

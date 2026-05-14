@@ -45,6 +45,7 @@ def load_render_data(settings: Settings) -> dict:
         runs = conn.execute("SELECT * FROM run_log ORDER BY id DESC LIMIT 8").fetchall()
         quality = conn.execute("SELECT * FROM data_quality_checks ORDER BY id DESC LIMIT 12").fetchall()
         sources = conn.execute("SELECT source, COUNT(*) AS n, MAX(date) AS max_date FROM prices GROUP BY source ORDER BY source").fetchall()
+        breadth = conn.execute("SELECT * FROM breadth_daily ORDER BY date DESC LIMIT 90").fetchall()
         active_equities = conn.execute("SELECT COUNT(*) AS n FROM symbols WHERE asset_class = 'equity' AND active = 1").fetchone()["n"]
         priced_equities = conn.execute(
             """
@@ -91,9 +92,11 @@ def load_render_data(settings: Settings) -> dict:
     index_rows = [dict(row) for row in indexes]
     for row in index_rows:
         row["history"] = history_by_symbol.get(row["symbol"], [])
+    breadth_rows = [dict(row) for row in reversed(breadth)]
     return {
         "latest_date": latest_metric or "No data",
         "metrics": [dict(row) for row in metrics],
+        "breadth": breadth_rows,
         "sectors": [dict(row) for row in sectors],
         "industries": industry_rows_with_hit_counts([dict(row) for row in industries], [dict(row) for row in hits]),
         "hits": [dict(row) for row in hits],
@@ -122,7 +125,7 @@ def industry_rows_with_hit_counts(industries: list[dict], hits: list[dict]) -> l
 
 
 def render_index(data: dict) -> str:
-    metric_pills = "\n".join(render_metric_card(row) for row in data["metrics"])
+    metric_pills = "\n".join(render_metric_card(row, data.get("breadth", [])) for row in data["metrics"])
     index_cards = "\n".join(render_index_card(row) for row in data["indexes"])
     sectors = render_sector_heatmap(data["sectors"])
     industry_leadership = render_industry_leadership(data["industries"])
@@ -179,9 +182,13 @@ def render_detail(slug: str, title: str, data: dict) -> str:
             f"<h1>{title}</h1>{render_sector_heatmap(data['sectors'])}"
             f"<h2>Industry Leadership</h2>{render_industry_leadership(data['industries'])}"
         )
+    elif slug == "breadth":
+        related = [row for row in data["metrics"] if "breadth" in row["metric_id"]]
+        cards = "".join(render_metric_card(row, data.get("breadth", [])) for row in related) or "<p>No dedicated metric rows available yet.</p>"
+        body = f"<h1>{title}</h1><div class='cards'>{cards}</div>{render_breadth_history(data.get('breadth', []))}"
     else:
         related = [row for row in data["metrics"] if slug.split("-")[0] in row["metric_id"] or title.lower().split()[0] in row["metric_id"]]
-        cards = "".join(render_metric_card(row) for row in related) or "<p>No dedicated metric rows available yet.</p>"
+        cards = "".join(render_metric_card(row, data.get("breadth", [])) for row in related) or "<p>No dedicated metric rows available yet.</p>"
         body = f"<h1>{title}</h1><div class='cards'>{cards}</div>"
     return page(title, f"<header class='topbar'><strong>{title}</strong><nav>{nav_links()}</nav></header><main>{body}</main>")
 
@@ -227,6 +234,7 @@ def page(title: str, body: str) -> str:
     .sparkline {{ width: 100%; height: 34px; margin-top: 4px; overflow: visible; }}
     .sparkline path.line {{ fill: none; stroke-width: 2; vector-effect: non-scaling-stroke; }}
     .sparkline path.fill {{ opacity: .12; }}
+    .metric-card .sparkline {{ height: 28px; margin-top: 2px; }}
     .context {{ display: flex; align-items: center; gap: 8px; margin: 6px 0; font-size: 14px; }}
     .delta-up {{ color: var(--green); font-weight: 700; }}
     .delta-down {{ color: var(--red); font-weight: 700; }}
@@ -397,11 +405,16 @@ def page(title: str, body: str) -> str:
 </html>"""
 
 
-def render_metric_card(row: dict) -> str:
+def render_metric_card(row: dict, breadth_rows: list[dict] | None = None) -> str:
+    sparkline = ""
+    if row.get("metric_id") == "breadth_sp500_above_sma50" and breadth_rows:
+        spark_color = {"green": "var(--green)", "yellow": "var(--yellow)", "red": "var(--red)"}.get(row.get("status"), "var(--muted)")
+        sparkline = render_sparkline([item.get("pct_above_sma50") for item in breadth_rows], spark_color)
     return f"""
     <article class="metric-card {esc(row['status'])}">
       <strong>{esc(metric_title(row['metric_id']))}</strong>
       <div class="big">{esc(row['label'] or 'N/A')}</div>
+      {sparkline}
       {render_metric_delta(row)}
       <p class="muted">{esc(row['note'] or '')}</p>
     </article>"""
@@ -452,6 +465,34 @@ def render_sector_cell(value: float | None) -> str:
     if value is None:
         return "<div class='sector-cell' style='background:#edf0f4'>N/A</div>"
     return f"<div class='sector-cell' style='background:{return_color(float(value))}'>{value:.1%}</div>"
+
+
+def render_breadth_history(rows: list[dict]) -> str:
+    if not rows:
+        return "<section><h2>Breadth History</h2><p>No breadth history available yet.</p></section>"
+    latest_rows = list(reversed(rows[-30:]))
+    body = "".join(
+        "<tr>"
+        f"<td>{esc(row['date'])}</td>"
+        f"<td>{format_percent_value(row.get('pct_above_sma50'))}</td>"
+        f"<td>{format_percent_value(row.get('pct_above_sma200'))}</td>"
+        f"<td>{int(row.get('new_highs_52w') or 0)}</td>"
+        f"<td>{int(row.get('new_lows_52w') or 0)}</td>"
+        f"<td>{format_percent_value(row.get('pct_within_5pct_52w_high'))}</td>"
+        f"<td>{int(row.get('valid_symbols') or 0)}</td>"
+        "</tr>"
+        for row in latest_rows
+    )
+    return (
+        "<section><h2>Breadth History</h2>"
+        "<table><thead><tr><th>Date</th><th>&gt; SMA50</th><th>&gt; SMA200</th>"
+        "<th>52W Highs</th><th>52W Lows</th><th>Within 5% High</th><th>Valid</th></tr></thead>"
+        f"<tbody>{body}</tbody></table></section>"
+    )
+
+
+def format_percent_value(value: float | None) -> str:
+    return "N/A" if value is None else f"{float(value):.0f}%"
 
 
 def none_last(value: float | None) -> float:

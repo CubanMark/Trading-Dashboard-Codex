@@ -65,6 +65,20 @@ CREATE TABLE IF NOT EXISTS dimension_metrics (
     PRIMARY KEY (metric_id, date)
 );
 
+CREATE TABLE IF NOT EXISTS breadth_daily (
+    date TEXT PRIMARY KEY,
+    pct_above_sma50 REAL,
+    pct_above_sma200 REAL,
+    new_highs_52w INTEGER,
+    new_lows_52w INTEGER,
+    pct_within_5pct_52w_high REAL,
+    valid_symbols INTEGER NOT NULL,
+    valid_sma50 INTEGER NOT NULL,
+    valid_sma200 INTEGER NOT NULL,
+    valid_52w INTEGER NOT NULL,
+    status TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS sector_returns (
     symbol TEXT NOT NULL,
     date TEXT NOT NULL,
@@ -143,6 +157,15 @@ def init_db(db_path: Path) -> None:
         ensure_column(conn, "scanner_hits", "ma_distance_pct", "REAL")
         ensure_column(conn, "scanner_hits", "also_in", "TEXT")
         ensure_column(conn, "scanner_hits", "trigger_note", "TEXT")
+        ensure_column(conn, "breadth_daily", "pct_above_sma200", "REAL")
+        ensure_column(conn, "breadth_daily", "new_highs_52w", "INTEGER")
+        ensure_column(conn, "breadth_daily", "new_lows_52w", "INTEGER")
+        ensure_column(conn, "breadth_daily", "pct_within_5pct_52w_high", "REAL")
+        ensure_column(conn, "breadth_daily", "valid_symbols", "INTEGER NOT NULL DEFAULT 0")
+        ensure_column(conn, "breadth_daily", "valid_sma50", "INTEGER NOT NULL DEFAULT 0")
+        ensure_column(conn, "breadth_daily", "valid_sma200", "INTEGER NOT NULL DEFAULT 0")
+        ensure_column(conn, "breadth_daily", "valid_52w", "INTEGER NOT NULL DEFAULT 0")
+        ensure_column(conn, "breadth_daily", "status", "TEXT NOT NULL DEFAULT 'ok'")
 
 
 def ensure_column(conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:
@@ -265,6 +288,7 @@ def replace_actions(db_path: Path, actions: pd.DataFrame, source: str, symbols: 
 def clear_computed_outputs(db_path: Path) -> None:
     with connect(db_path) as conn:
         conn.execute("DELETE FROM dimension_metrics")
+        conn.execute("DELETE FROM breadth_daily")
         conn.execute("DELETE FROM sector_returns")
         conn.execute("DELETE FROM industry_returns")
         conn.execute("DELETE FROM scanner_hits")

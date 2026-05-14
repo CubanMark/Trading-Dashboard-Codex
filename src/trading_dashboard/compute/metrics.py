@@ -23,13 +23,14 @@ def compute_all_metrics(settings: Settings) -> None:
     price_map = price_frames_by_symbol(prices)
     symbol_meta = load_symbol_metadata(settings)
     log_compute_quality(settings, price_map, equity_symbols, symbol_meta)
-    metric_rows = dimension_metric_rows(price_map, latest_date, equity_symbols)
+    breadth_rows = breadth_history_rows(price_map, equity_symbols)
+    metric_rows = dimension_metric_rows(price_map, latest_date, equity_symbols, breadth_rows)
     sector_rows = sector_return_rows(price_map, latest_date)
     scanner_rows = pullback_hits(price_map, latest_date, equity_symbols, symbol_meta)
     log_scanner_quality(settings, price_map, equity_symbols, symbol_meta, scanner_rows)
     industry_rows = industry_return_rows(price_map, latest_date, equity_symbols, symbol_meta)
     clear_computed_outputs(settings.db_path)
-    write_compute_outputs(settings, metric_rows, sector_rows, industry_rows, scanner_rows, latest_date)
+    write_compute_outputs(settings, metric_rows, breadth_rows, sector_rows, industry_rows, scanner_rows, latest_date)
 
 
 def price_frames_by_symbol(prices: pd.DataFrame) -> dict[str, pd.DataFrame]:
@@ -39,9 +40,14 @@ def price_frames_by_symbol(prices: pd.DataFrame) -> dict[str, pd.DataFrame]:
     }
 
 
-def dimension_metric_rows(price_map: dict[str, pd.DataFrame], latest_date: str, equity_symbols: list[str]) -> list[dict]:
+def dimension_metric_rows(
+    price_map: dict[str, pd.DataFrame],
+    latest_date: str,
+    equity_symbols: list[str],
+    breadth_rows: list[dict] | None = None,
+) -> list[dict]:
     rows = [
-        breadth_metric(price_map, latest_date, equity_symbols),
+        breadth_metric(price_map, latest_date, equity_symbols, breadth_rows or []),
         sentiment_metric(latest_date),
         risk_metric(price_map, latest_date),
         credit_metric(latest_date),
@@ -88,7 +94,34 @@ def metric(
     }
 
 
-def breadth_metric(price_map: dict[str, pd.DataFrame], latest_date: str, equity_symbols: list[str]) -> dict:
+def breadth_metric(
+    price_map: dict[str, pd.DataFrame],
+    latest_date: str,
+    equity_symbols: list[str],
+    breadth_rows: list[dict],
+) -> dict:
+    if breadth_rows:
+        latest = breadth_rows[-1]
+        value = latest.get("pct_above_sma50")
+        if value is None:
+            return metric("breadth_sp500_above_sma50", latest_date, None, "N/A", "na", "flat", "No SMA50 breadth data")
+        prior = breadth_rows[-6]["pct_above_sma50"] if len(breadth_rows) >= 6 else None
+        status = traffic_light(value, value > 60, 40 <= value <= 60)
+        trend = trend_from_change(value, prior)
+        return metric(
+            "breadth_sp500_above_sma50",
+            latest_date,
+            value,
+            f"{value:.0f}% > SMA50",
+            status,
+            trend,
+            (
+                f"{int(latest['valid_sma50'])}/{len(equity_symbols)} valid; "
+                f"{fmt_pct(latest.get('pct_above_sma200'))} > SMA200; "
+                f"{int(latest['new_highs_52w'])} NH / {int(latest['new_lows_52w'])} NL"
+            ),
+            prior,
+        )
     current = breadth_value(price_map, equity_symbols, 0)
     prior_result = breadth_value(price_map, equity_symbols, 5)
     if current is None:
@@ -122,6 +155,65 @@ def breadth_value(price_map: dict[str, pd.DataFrame], equity_symbols: list[str],
     if not values:
         return None
     return sum(values) / len(values) * 100, len(values)
+
+
+def breadth_history_rows(price_map: dict[str, pd.DataFrame], equity_symbols: list[str]) -> list[dict]:
+    frames: list[pd.DataFrame] = []
+    for symbol in equity_symbols:
+        frame = latest_symbol_frame(price_map, symbol)
+        if frame.empty:
+            continue
+        prepared = frame[["date", "close"]].copy()
+        prepared["symbol"] = symbol
+        prepared["sma50"] = sma(prepared["close"], 50)
+        prepared["sma200"] = sma(prepared["close"], 200)
+        prepared["high_252"] = prepared["close"].rolling(252, min_periods=200).max()
+        prepared["low_252"] = prepared["close"].rolling(252, min_periods=200).min()
+        frames.append(prepared)
+    if not frames:
+        return []
+    combined = pd.concat(frames, ignore_index=True).sort_values(["date", "symbol"])
+    rows: list[dict] = []
+    for date_value, group in combined.groupby("date", sort=True):
+        close = group["close"]
+        valid_symbols = int(close.notna().sum())
+        sma50_mask = group["sma50"].notna() & close.notna()
+        sma200_mask = group["sma200"].notna() & close.notna()
+        high52_mask = group["high_252"].notna() & group["low_252"].notna() & close.notna()
+        valid_sma50 = int(sma50_mask.sum())
+        valid_sma200 = int(sma200_mask.sum())
+        valid_52w = int(high52_mask.sum())
+        pct_above_sma50 = percent_true(close[sma50_mask] > group.loc[sma50_mask, "sma50"])
+        pct_above_sma200 = percent_true(close[sma200_mask] > group.loc[sma200_mask, "sma200"])
+        highs = 0 if valid_52w == 0 else int((close[high52_mask] >= group.loc[high52_mask, "high_252"]).sum())
+        lows = 0 if valid_52w == 0 else int((close[high52_mask] <= group.loc[high52_mask, "low_252"]).sum())
+        near_high = percent_true(close[high52_mask] >= group.loc[high52_mask, "high_252"] * 0.95)
+        rows.append(
+            {
+                "date": pd.Timestamp(date_value).strftime("%Y-%m-%d"),
+                "pct_above_sma50": pct_above_sma50,
+                "pct_above_sma200": pct_above_sma200,
+                "new_highs_52w": highs,
+                "new_lows_52w": lows,
+                "pct_within_5pct_52w_high": near_high,
+                "valid_symbols": valid_symbols,
+                "valid_sma50": valid_sma50,
+                "valid_sma200": valid_sma200,
+                "valid_52w": valid_52w,
+                "status": "ok" if valid_sma50 else "na",
+            }
+        )
+    return rows
+
+
+def percent_true(values: pd.Series) -> float | None:
+    if len(values) == 0:
+        return None
+    return float(values.sum() / len(values) * 100)
+
+
+def fmt_pct(value: float | None) -> str:
+    return "N/A" if value is None or pd.isna(value) else f"{value:.0f}%"
 
 
 def sentiment_metric(latest_date: str) -> dict:
@@ -269,6 +361,7 @@ def industry_return_rows(
 def write_compute_outputs(
     settings: Settings,
     metric_rows: list[dict],
+    breadth_rows: list[dict],
     sector_rows: list[dict],
     industry_rows: list[dict],
     scanner_rows: list[dict],
@@ -283,6 +376,20 @@ def write_compute_outputs(
             """,
             metric_rows,
         )
+        if breadth_rows:
+            conn.executemany(
+                """
+                INSERT INTO breadth_daily (
+                    date, pct_above_sma50, pct_above_sma200, new_highs_52w, new_lows_52w,
+                    pct_within_5pct_52w_high, valid_symbols, valid_sma50, valid_sma200, valid_52w, status
+                )
+                VALUES (
+                    :date, :pct_above_sma50, :pct_above_sma200, :new_highs_52w, :new_lows_52w,
+                    :pct_within_5pct_52w_high, :valid_symbols, :valid_sma50, :valid_sma200, :valid_52w, :status
+                )
+                """,
+                breadth_rows,
+            )
         conn.execute("DELETE FROM sector_returns WHERE date = ?", (latest_date,))
         conn.executemany(
             """

@@ -1,6 +1,6 @@
 # Session Handoff - Trading Dashboard
 
-Stand: 2026-05-14, Update nach Data-Quality-Haertung
+Stand: 2026-05-14, Update nach Breadth-Historie
 Phase: 1 MVP
 Baseline-Commit: `e9e41bb Create phase 1 MVP baseline`
 
@@ -20,12 +20,13 @@ Das Projekt hat eine funktionierende Phase-1-MVP-Basis:
 - statische HTML-Seiten unter `pages/`
 - GitHub-Actions-Workflow fuer Pages-Build
 - Tests fuer Indikatoren, Storage, Universe-Loader, Pullback-Scanner, Fetch-Replacement und Mock-Integration
+- persistierte Breadth-Historie in `breadth_daily` mit SMA50/SMA200, 52W Highs/Lows und Coverage
 
 Letzte bekannte Verifikation:
 
 ```powershell
-$env:PYTHONPATH='src'; python -m pytest -q -p no:cacheprovider
-# 19 passed
+python -m pytest -q -p no:cacheprovider
+# 21 passed
 ```
 
 Zusaetzliche lokale Verifikation:
@@ -43,9 +44,10 @@ $env:PYTHONPATH='src'; python -m trading_dashboard update --years 1
 
 Die Homepage zeigt derzeit:
 
-- Index-Strip fuer SPY, QQQ, IWM, VIX/TLT-Kontext
+- Index-Strip fuer SPY, QQQ, IWM, VIX/TLT-Kontext mit kleinen Sparklines
 - Market-State-Pills fuer sechs Dimensionen
-- Sektor-Performance getrennt in `Positive 1W` und `Negative 1W`
+- Breadth-Pill mit Historien-Sparkline und Kontext zu SMA200 sowie 52W Highs/Lows
+- kompakte Sektor-Heatmap fuer 1W und 1M
 - Industry Leadership mit Top 10 und Bottom 10
 - Research Scanner Hits ueber die volle Breite
 - Run Status und Data Quality Log
@@ -69,6 +71,7 @@ Neu gehaertet:
 - Dashboard-Topbar zeigt eine kompakte Betriebszeile: Quelle, letztes Daten-Datum, Equity-Coverage, OHLC-Status und Return-Warnungen.
 - Extreme Tagesrenditen werden getrennt geloggt als `corporate_action_returns` und `extreme_daily_returns`.
 - Scanner-Coverage wird geloggt: letzter echter Lauf 1150 Symbole gescannt, 93 per Industry ausgeschlossen, 75 Research Hits.
+- Breadth-Historie wird bei `compute` aus den gespeicherten Kursen neu aufgebaut und bei `render` auf `/breadth.html` als Tabelle der letzten 30 Handelstage angezeigt. Die Homepage nutzt dieselbe Historie fuer die Breadth-Sparkline.
 
 ## Scanner-Status
 
@@ -115,7 +118,7 @@ Hohe Prioritaet:
 
 Mittlere Prioritaet:
 
-- Detailseiten sind noch minimal und brauchen echte Historie/Drilldown-Kontext.
+- Detailseiten sind noch minimal; Breadth hat jetzt den ersten echten Historien-Drilldown, die uebrigen Dimensionen brauchen noch Verlauf/Kontext.
 - Industry Leadership ist nuetzlich, aber noch keine echte RRG-/Leadership-Analyse.
 - Pullback-Regeln sollten fachlich final dokumentiert werden.
 
@@ -134,8 +137,7 @@ Mittlere Prioritaet:
    - Liquiditaetsfilter dokumentieren
    - Anzahl verwendeter Werte in Breadth und Scanner noch prominenter machen
 
-4. Danach erst Detailseiten ausbauen:
-   - Breadth-Historie
+4. Danach weitere Detailseiten ausbauen:
    - Risk-On/Off-Verlauf
    - Volatility mit VIX/VIX3M-Kontext
    - Credit/Macro-Fallback sauberer darstellen
