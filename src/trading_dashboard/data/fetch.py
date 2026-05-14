@@ -10,6 +10,8 @@ from ..config import INDEX_SYMBOLS, SECTOR_ETFS, SYMBOL_SECTORS, Settings
 from .storage import log_quality, log_run, replace_actions, replace_prices, upsert_symbols
 from .universe import load_equity_universe
 
+COMMON_SPLIT_RATIOS = (2.0, 3.0, 4.0, 5.0, 10.0)
+
 
 def fetch_prices(settings: Settings, use_mock: bool = False) -> None:
     upsert_symbols(settings.db_path, symbol_rows(settings))
@@ -253,10 +255,17 @@ def quality_check_prices(settings: Settings, prices: pd.DataFrame, actions: pd.D
     )
 
     sorted_prices = prices.sort_values(["symbol", "date"]).copy()
-    sorted_prices["daily_return"] = sorted_prices.groupby("symbol")["close"].pct_change()
+    grouped_closes = sorted_prices.groupby("symbol")["close"]
+    sorted_prices["previous_close"] = grouped_closes.shift(1)
+    sorted_prices["next_close"] = grouped_closes.shift(-1)
+    sorted_prices["daily_return"] = grouped_closes.pct_change()
     extreme_mask = sorted_prices["daily_return"].abs().gt(0.50).fillna(False)
-    extreme_rows = sorted_prices.loc[extreme_mask, ["symbol", "date", "daily_return"]].copy()
+    extreme_rows = sorted_prices.loc[
+        extreme_mask,
+        ["symbol", "date", "open", "high", "low", "close", "volume", "previous_close", "next_close", "daily_return"],
+    ].copy()
     action_related, unexplained = classify_extreme_returns(extreme_rows, actions)
+    diagnostics = diagnose_extreme_returns(extreme_rows, actions)
     log_quality(
         settings.db_path,
         "corporate_action_returns",
@@ -271,6 +280,12 @@ def quality_check_prices(settings: Settings, prices: pd.DataFrame, actions: pd.D
         "extreme_daily_returns",
         "ok" if not unexplained else "warning",
         f"{len(unexplained)} unexplained rows with absolute daily return > 50%{example_suffix(unexplained)}",
+    )
+    log_quality(
+        settings.db_path,
+        "extreme_return_diagnostics",
+        "ok" if not diagnostics else "warning",
+        extreme_return_diagnostics_message(diagnostics),
     )
 
     equity_symbols = set(settings.equity_symbols)
@@ -315,6 +330,48 @@ def classify_extreme_returns(extreme_rows: pd.DataFrame, actions: pd.DataFrame |
     return sorted(set(action_related)), sorted(set(unexplained))
 
 
+def diagnose_extreme_returns(extreme_rows: pd.DataFrame, actions: pd.DataFrame | None) -> list[dict]:
+    if extreme_rows.empty:
+        return []
+    action_keys = corporate_action_keys(actions)
+    return [diagnose_extreme_return(record, action_keys) for record in extreme_rows.to_dict("records")]
+
+
+def diagnose_extreme_return(record: dict, action_keys: set[tuple[str, str]]) -> dict:
+    symbol = str(record["symbol"])
+    date_value = record["date"]
+    action_window = action_dates_around(date_value)
+    if any((symbol, day) in action_keys for day in action_window):
+        label = "corporate_action"
+    elif is_split_like_move(record):
+        label = "missing_corporate_action"
+    elif is_one_day_reversal(record):
+        label = "possible_data_error"
+    else:
+        label = "likely_real_move"
+    return {
+        "label": label,
+        "example": extreme_return_label(record),
+    }
+
+
+def extreme_return_diagnostics_message(diagnostics: list[dict]) -> str:
+    if not diagnostics:
+        return "0 extreme returns diagnosed"
+    counts: dict[str, int] = {}
+    examples_by_label: dict[str, list[str]] = {}
+    for item in diagnostics:
+        label = str(item["label"])
+        counts[label] = counts.get(label, 0) + 1
+        examples_by_label.setdefault(label, []).append(str(item["example"]))
+    parts = [f"{len(diagnostics)} extreme returns diagnosed"]
+    for label in ["missing_corporate_action", "possible_data_error", "corporate_action", "likely_real_move"]:
+        if label in counts:
+            parts.append(f"{label}={counts[label]}")
+    priority_examples = examples_by_label.get("missing_corporate_action") or examples_by_label.get("possible_data_error") or examples_by_label.get("likely_real_move") or []
+    return "; ".join(parts) + example_suffix(priority_examples)
+
+
 def extreme_return_label(record: dict) -> str:
     symbol = str(record["symbol"])
     day = pd.Timestamp(record["date"]).strftime("%Y-%m-%d")
@@ -322,6 +379,35 @@ def extreme_return_label(record: dict) -> str:
     if daily_return is None or pd.isna(daily_return):
         return f"{symbol} {day}"
     return f"{symbol} {day} {float(daily_return):+.1%}"
+
+
+def is_split_like_move(record: dict) -> bool:
+    previous_close = record.get("previous_close")
+    close = record.get("close")
+    if previous_close is None or close is None or pd.isna(previous_close) or pd.isna(close) or float(previous_close) <= 0:
+        return False
+    ratio = abs(float(close) / float(previous_close))
+    if ratio <= 0:
+        return False
+    candidates = list(COMMON_SPLIT_RATIOS) + [1 / value for value in COMMON_SPLIT_RATIOS]
+    return any(abs(ratio - candidate) / candidate <= 0.08 for candidate in candidates)
+
+
+def is_one_day_reversal(record: dict) -> bool:
+    previous_close = record.get("previous_close")
+    close = record.get("close")
+    next_close = record.get("next_close")
+    if any(value is None or pd.isna(value) for value in [previous_close, close, next_close]):
+        return False
+    previous = float(previous_close)
+    current = float(close)
+    following = float(next_close)
+    if previous <= 0 or current <= 0 or following <= 0:
+        return False
+    current_vs_previous = abs(current / previous - 1)
+    following_vs_previous = abs(following / previous - 1)
+    following_vs_current = abs(following / current - 1)
+    return current_vs_previous > 0.50 and following_vs_previous < 0.20 and following_vs_current > 0.35
 
 
 def corporate_action_keys(actions: pd.DataFrame | None) -> set[tuple[str, str]]:
