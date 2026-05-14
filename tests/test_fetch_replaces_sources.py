@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 
 from trading_dashboard.data.fetch import drop_unfinished_session
-from trading_dashboard.data.storage import connect, init_db, replace_prices
+from trading_dashboard.data.storage import connect, init_db, replace_actions, replace_prices
 
 
 def test_replace_prices_removes_prior_mock_rows_for_symbols():
@@ -34,6 +34,43 @@ def test_replace_prices_removes_prior_mock_rows_for_symbols():
     with connect(db) as conn:
         rows = [dict(row) for row in conn.execute("SELECT date, close, source FROM prices WHERE symbol = 'SPY' ORDER BY date")]
     assert rows == [{"date": "2026-05-13", "close": 700.0, "source": "yfinance"}]
+
+
+def test_replace_prices_can_preserve_unfetched_symbol_history():
+    tmp_dir = Path(".tmp_tests")
+    tmp_dir.mkdir(exist_ok=True)
+    db = tmp_dir / f"preserve-{uuid4().hex}.sqlite3"
+    init_db(db)
+    replace_prices(
+        db,
+        pd.DataFrame(
+            [
+                price_row("ANF", "2026-05-13", 100, "yfinance"),
+                price_row("SPY", "2026-05-13", 500, "yfinance"),
+            ]
+        ).drop(columns=["source"]),
+        "yfinance",
+        ["ANF", "SPY"],
+    )
+    replace_actions(db, pd.DataFrame(), "yfinance", ["ANF", "SPY"])
+
+    replace_prices(
+        db,
+        pd.DataFrame([price_row("SPY", "2026-05-14", 510, "yfinance")]).drop(columns=["source"]),
+        "yfinance",
+        ["SPY"],
+    )
+    replace_actions(db, pd.DataFrame(), "yfinance", ["SPY"])
+
+    with connect(db) as conn:
+        rows = [
+            dict(row)
+            for row in conn.execute("SELECT symbol, date, close FROM prices ORDER BY symbol, date")
+        ]
+    assert rows == [
+        {"symbol": "ANF", "date": "2026-05-13", "close": 100.0},
+        {"symbol": "SPY", "date": "2026-05-14", "close": 510.0},
+    ]
 
 
 def price_row(symbol: str, date: str, close: float, source: str) -> dict:

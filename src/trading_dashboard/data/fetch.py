@@ -30,8 +30,9 @@ def fetch_prices(settings: Settings, use_mock: bool = False) -> None:
     else:
         source = "yfinance"
 
-    replace_prices(settings.db_path, prices, source, settings.all_price_symbols)
-    replace_actions(settings.db_path, actions, source, settings.all_price_symbols)
+    replacement_symbols = settings.all_price_symbols if source == "mock-fallback" else fetched_symbols(prices)
+    replace_prices(settings.db_path, prices, source, replacement_symbols)
+    replace_actions(settings.db_path, actions, source, replacement_symbols)
     quality_check_prices(settings, prices, actions, source)
 
 
@@ -72,12 +73,31 @@ def yfinance_prices(symbols: list[str], years: int, batch_size: int = 80) -> tup
     price_frames: list[pd.DataFrame] = []
     action_rows: list[dict] = []
     for batch in chunks(symbols, batch_size):
-        batch_prices, batch_actions = yfinance_batch(yf, batch, start)
+        try:
+            batch_prices, batch_actions = yfinance_batch(yf, batch, start)
+        except Exception:
+            batch_prices, batch_actions = [], []
         price_frames.extend(batch_prices)
         action_rows.extend(batch_actions)
+    fetched = {str(frame["symbol"].iloc[0]) for frame in price_frames if not frame.empty}
+    missing_after_batches = [symbol for symbol in symbols if symbol not in fetched]
+    for symbol in missing_after_batches:
+        try:
+            retry_prices, retry_actions = yfinance_batch(yf, [symbol], start)
+        except Exception:
+            retry_prices, retry_actions = [], []
+        if retry_prices:
+            price_frames.extend(retry_prices)
+            action_rows.extend(retry_actions)
     if not price_frames:
         raise RuntimeError("No usable yfinance price frames")
     return pd.concat(price_frames, ignore_index=True), pd.DataFrame(action_rows)
+
+
+def fetched_symbols(prices: pd.DataFrame) -> list[str]:
+    if prices.empty or "symbol" not in prices.columns:
+        return []
+    return sorted(prices["symbol"].dropna().astype(str).unique().tolist())
 
 
 def yfinance_batch(yf, symbols: list[str], start: date) -> tuple[list[pd.DataFrame], list[dict]]:
@@ -194,7 +214,7 @@ def quality_check_prices(settings: Settings, prices: pd.DataFrame, actions: pd.D
         settings.db_path,
         "missing_symbols",
         "ok" if not missing_symbols else "warning",
-        f"{len(missing_symbols)} symbols missing from {source}{example_suffix(missing_symbols)}",
+        f"{len(missing_symbols)} symbols missing from {source} after batch and single-symbol retry{example_suffix(missing_symbols)}",
     )
 
     latest_by_symbol = prices.groupby("symbol")["date"].max()
@@ -233,9 +253,9 @@ def quality_check_prices(settings: Settings, prices: pd.DataFrame, actions: pd.D
     )
 
     sorted_prices = prices.sort_values(["symbol", "date"]).copy()
-    returns = sorted_prices.groupby("symbol")["close"].pct_change()
-    extreme_mask = returns.abs().gt(0.50).fillna(False)
-    extreme_rows = sorted_prices.loc[extreme_mask, ["symbol", "date"]].copy()
+    sorted_prices["daily_return"] = sorted_prices.groupby("symbol")["close"].pct_change()
+    extreme_mask = sorted_prices["daily_return"].abs().gt(0.50).fillna(False)
+    extreme_rows = sorted_prices.loc[extreme_mask, ["symbol", "date", "daily_return"]].copy()
     action_related, unexplained = classify_extreme_returns(extreme_rows, actions)
     log_quality(
         settings.db_path,
@@ -291,8 +311,17 @@ def classify_extreme_returns(extreme_rows: pd.DataFrame, actions: pd.DataFrame |
         symbol = str(record["symbol"])
         action_window = action_dates_around(record["date"])
         target = action_related if any((symbol, day) in action_keys for day in action_window) else unexplained
-        target.append(symbol)
+        target.append(extreme_return_label(record))
     return sorted(set(action_related)), sorted(set(unexplained))
+
+
+def extreme_return_label(record: dict) -> str:
+    symbol = str(record["symbol"])
+    day = pd.Timestamp(record["date"]).strftime("%Y-%m-%d")
+    daily_return = record.get("daily_return")
+    if daily_return is None or pd.isna(daily_return):
+        return f"{symbol} {day}"
+    return f"{symbol} {day} {float(daily_return):+.1%}"
 
 
 def corporate_action_keys(actions: pd.DataFrame | None) -> set[tuple[str, str]]:
