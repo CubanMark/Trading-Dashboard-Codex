@@ -32,7 +32,10 @@ def test_mock_update_creates_db_and_html():
     assert "equities 2/2" in html
     assert "OHLC ok" in html
     assert "deterministic mock data" in html
-    assert "grid-template-columns: repeat(auto-fill, 118px)" in html
+    assert 'class="market-state"' in html
+    assert 'class="metric-grid"' in html
+    assert "sector-heatmap" in html
+    assert "sparkline" in html
     assert "syncFilterOptions" in html
 
 
@@ -102,16 +105,18 @@ def test_scanner_filter_markup_is_rendered():
     assert "data-sort-cell='perf_1w' data-sort-type='number' data-sort-value='0.02'" in html
 
 
-def test_sector_groups_split_positive_and_negative_weekly_returns():
-    from trading_dashboard.render.html import render_sector_groups
+def test_sector_heatmap_orders_by_weekly_returns_and_shows_two_periods():
+    from trading_dashboard.render.html import render_sector_heatmap
 
-    html = render_sector_groups(
+    html = render_sector_heatmap(
         [
             {"symbol": "XLK", "sector": "Technology", "return_1w": 0.02, "return_1m": 0.05},
             {"symbol": "XLV", "sector": "Health Care", "return_1w": -0.01, "return_1m": -0.03},
         ]
     )
-    assert "Positive 1W" in html
-    assert "Negative 1W" in html
-    assert html.index("XLK") < html.index("Negative 1W")
-    assert html.index("XLV") > html.index("Negative 1W")
+    assert "sector-heatmap" in html
+    assert ">1W<" in html
+    assert ">1M<" in html
+    assert html.index("XLK") < html.index("XLV")
+    assert "2.0%" in html
+    assert "-3.0%" in html

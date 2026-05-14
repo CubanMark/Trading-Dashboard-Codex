@@ -17,6 +17,8 @@ PAGES = {
     "scanners": "Scanners",
 }
 
+INDEX_SYMBOLS = ("SPY", "QQQ", "IWM", "^VIX", "TLT")
+
 
 def render_site(settings: Settings) -> None:
     settings.pages_dir.mkdir(parents=True, exist_ok=True)
@@ -69,6 +71,26 @@ def load_render_data(settings: Settings) -> dict:
             ORDER BY p.symbol
             """
         ).fetchall()
+        index_history = conn.execute(
+            """
+            SELECT symbol, date, close
+            FROM (
+              SELECT symbol, date, close,
+                     ROW_NUMBER() OVER (PARTITION BY symbol ORDER BY date DESC) AS rn
+              FROM prices
+              WHERE symbol IN ('SPY', 'QQQ', 'IWM', '^VIX', 'TLT')
+            )
+            WHERE rn <= 20
+            ORDER BY symbol, date
+            """
+        ).fetchall()
+    history_by_symbol: dict[str, list[float]] = {}
+    for row in index_history:
+        if row["close"] is not None:
+            history_by_symbol.setdefault(row["symbol"], []).append(float(row["close"]))
+    index_rows = [dict(row) for row in indexes]
+    for row in index_rows:
+        row["history"] = history_by_symbol.get(row["symbol"], [])
     return {
         "latest_date": latest_metric or "No data",
         "metrics": [dict(row) for row in metrics],
@@ -79,8 +101,13 @@ def load_render_data(settings: Settings) -> dict:
         "quality": [dict(row) for row in quality],
         "sources": [dict(row) for row in sources],
         "operation": operation_summary([dict(row) for row in sources], [dict(row) for row in quality], active_equities, priced_equities),
-        "indexes": [dict(row) for row in indexes],
+        "indexes": sort_index_rows(index_rows),
     }
+
+
+def sort_index_rows(rows: list[dict]) -> list[dict]:
+    order = {symbol: index for index, symbol in enumerate(INDEX_SYMBOLS)}
+    return sorted(rows, key=lambda row: order.get(str(row.get("symbol")), len(order)))
 
 
 def industry_rows_with_hit_counts(industries: list[dict], hits: list[dict]) -> list[dict]:
@@ -95,9 +122,9 @@ def industry_rows_with_hit_counts(industries: list[dict], hits: list[dict]) -> l
 
 
 def render_index(data: dict) -> str:
-    metric_pills = "\n".join(render_metric_pill(row) for row in data["metrics"])
+    metric_pills = "\n".join(render_metric_card(row) for row in data["metrics"])
     index_cards = "\n".join(render_index_card(row) for row in data["indexes"])
-    sectors = render_sector_groups(data["sectors"])
+    sectors = render_sector_heatmap(data["sectors"])
     industry_leadership = render_industry_leadership(data["industries"])
     hits = render_hits_table(data["hits"])
     logs = render_logs(data)
@@ -112,10 +139,12 @@ def render_index(data: dict) -> str:
         </header>
         {source_notice}
         <section class="index-strip">{index_cards}</section>
-        <section class="state-strip">
-          <h1>Market State</h1>
-          <div class="pills">{metric_pills}</div>
-          <p>Read dimensions individually. No auto-composite.</p>
+        <section class="market-state">
+          <div class="section-heading">
+            <h1>Market State</h1>
+            <p>Read dimensions individually. No auto-composite.</p>
+          </div>
+          <div class="metric-grid">{metric_pills}</div>
         </section>
         <main class="dashboard">
           <section class="full-width">
@@ -147,7 +176,7 @@ def render_detail(slug: str, title: str, data: dict) -> str:
         body = f"<h1>{title}</h1><p class='warning'>Pullback-v2a is a research/watchlist scanner only.</p>{render_hits_table(data['hits'])}"
     elif slug == "sectors":
         body = (
-            f"<h1>{title}</h1>{render_sector_groups(data['sectors'])}"
+            f"<h1>{title}</h1>{render_sector_heatmap(data['sectors'])}"
             f"<h2>Industry Leadership</h2>{render_industry_leadership(data['industries'])}"
         )
     else:
@@ -184,22 +213,32 @@ def page(title: str, body: str) -> str:
     * {{ box-sizing: border-box; }}
     body {{ margin: 0; font-family: Arial, sans-serif; background: var(--bg); color: var(--text); }}
     a {{ color: var(--blue); text-decoration: none; }}
-    .topbar {{ min-height: 58px; display: flex; align-items: center; gap: 20px; padding: 0 24px; border-bottom: 1px solid var(--line); background: var(--panel); flex-wrap: wrap; }}
+    .topbar {{ min-height: 44px; display: flex; align-items: center; gap: 18px; padding: 0 22px; border-bottom: 1px solid var(--line); background: var(--panel); flex-wrap: wrap; }}
+    .topbar > strong {{ white-space: nowrap; }}
     nav {{ display: flex; gap: 12px; flex-wrap: wrap; font-size: 14px; }}
     .operation-status {{ margin-left: auto; text-align: right; font-size: 12px; line-height: 1.35; color: var(--muted); }}
-    .index-strip, .state-strip, .logs, main {{ max-width: 1180px; margin: 18px auto; padding: 0 18px; }}
-    .index-strip {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }}
-    .index-card, .metric-card, section, .state-strip {{ background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 16px; }}
-    .index-card strong, .metric-card strong {{ display: block; font-size: 13px; color: var(--muted); }}
-    .big {{ font-size: 32px; font-weight: 700; margin: 8px 0; }}
+    .index-strip, .market-state, .logs, main {{ max-width: 1180px; margin: 18px auto; padding: 0 18px; }}
+    .index-strip {{ display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }}
+    .index-card, .metric-card, section, .market-state {{ background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 14px; }}
+    .index-card {{ min-height: 118px; display: grid; grid-template-rows: auto auto auto 1fr; gap: 4px; overflow: hidden; }}
+    .index-card strong, .metric-card strong {{ display: block; font-size: 12px; color: var(--muted); }}
+    .big {{ font-size: 28px; font-weight: 700; margin: 4px 0; }}
+    .index-card .big {{ font-size: 24px; }}
+    .sparkline {{ width: 100%; height: 34px; margin-top: 4px; overflow: visible; }}
+    .sparkline path.line {{ fill: none; stroke-width: 2; vector-effect: non-scaling-stroke; }}
+    .sparkline path.fill {{ opacity: .12; }}
     .context {{ display: flex; align-items: center; gap: 8px; margin: 6px 0; font-size: 14px; }}
     .delta-up {{ color: var(--green); font-weight: 700; }}
     .delta-down {{ color: var(--red); font-weight: 700; }}
     .delta-flat {{ color: var(--muted); font-weight: 700; }}
-    .state-strip {{ display: flex; align-items: center; gap: 22px; }}
-    .state-strip h1 {{ margin: 0; font-size: 28px; }}
-    .pills, .cards {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; flex: 1; }}
-    .pill {{ border: 1px solid var(--line); border-radius: 8px; padding: 12px; background: var(--panel); }}
+    .market-state {{ display: grid; gap: 12px; }}
+    .section-heading {{ display: flex; align-items: baseline; justify-content: space-between; gap: 16px; }}
+    .section-heading h1 {{ margin: 0; font-size: 22px; }}
+    .section-heading p {{ margin: 0; color: var(--muted); font-size: 14px; }}
+    .metric-grid, .cards {{ display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; }}
+    .metric-card {{ min-height: 122px; display: grid; align-content: start; gap: 4px; }}
+    .metric-card .big {{ font-size: 20px; line-height: 1.12; overflow-wrap: anywhere; }}
+    .metric-card .muted {{ margin: 4px 0 0; font-size: 13px; line-height: 1.35; }}
     .green {{ border-top: 5px solid var(--green); }}
     .yellow {{ border-top: 5px solid var(--yellow); }}
     .red {{ border-top: 5px solid var(--red); }}
@@ -207,11 +246,14 @@ def page(title: str, body: str) -> str:
     .dashboard {{ display: grid; gap: 16px; }}
     .full-width {{ width: 100%; }}
     section h2 {{ margin-top: 0; font-size: 18px; }}
-    .heatmap {{ display: grid; grid-template-columns: repeat(auto-fill, 118px); gap: 8px; justify-content: start; }}
-    .sector-groups {{ display: grid; gap: 12px; }}
-    .sector-group h3 {{ margin: 0 0 8px; font-size: 14px; color: var(--muted); }}
-    .sector {{ min-height: 92px; border-radius: 6px; padding: 10px; color: #101820; border: 1px solid rgba(0,0,0,.08); }}
-    .sector b {{ font-size: 18px; }}
+    .sector-heatmap {{ display: grid; grid-template-columns: minmax(220px, 260px) repeat(2, minmax(120px, 1fr)); gap: 2px; align-items: stretch; }}
+    .sector-head, .sector-label, .sector-cell {{ min-height: 34px; align-items: center; border: 1px solid rgba(24,32,42,.06); padding: 6px 8px; font-size: 13px; }}
+    .sector-head, .sector-cell {{ display: flex; }}
+    .sector-head {{ color: var(--muted); font-weight: 700; background: #f3f5f8; justify-content: center; }}
+    .sector-label {{ display: grid; grid-template-columns: 46px minmax(0, 1fr); gap: 8px; color: var(--text); background: #f9fafb; }}
+    .sector-label b {{ font-size: 12px; text-align: right; }}
+    .sector-label span {{ min-width: 0; line-height: 1.15; overflow-wrap: normal; }}
+    .sector-cell {{ justify-content: center; font-weight: 700; color: #101820; }}
     table {{ width: 100%; border-collapse: collapse; font-size: 14px; }}
     th, td {{ border-bottom: 1px solid var(--line); padding: 8px; text-align: left; }}
     th button {{ display: inline-flex; align-items: center; gap: 4px; border: 0; padding: 0; background: transparent; color: inherit; font: inherit; font-weight: 700; cursor: pointer; }}
@@ -237,9 +279,27 @@ def page(title: str, body: str) -> str:
     .tag-3d {{ color: #7c2d12; background: #ffedd5; border: 1px solid #fed7aa; }}
     .tag-neutral {{ color: #475569; background: #f1f5f9; border: 1px solid #e2e8f0; }}
     .loggrid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }}
+    @media (max-width: 1100px) {{
+      .metric-grid, .cards {{ grid-template-columns: repeat(3, minmax(0, 1fr)); }}
+    }}
     @media (max-width: 850px) {{
+      .index-strip {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
       .industry-grid {{ grid-template-columns: 1fr; }}
-      .state-strip {{ align-items: stretch; flex-direction: column; }}
+      .section-heading {{ display: block; }}
+      .metric-grid, .cards {{ grid-template-columns: repeat(2, minmax(0, 1fr)); }}
+      .sector-heatmap {{ grid-template-columns: minmax(170px, 210px) repeat(2, minmax(80px, 1fr)); }}
+      .sector-head, .sector-label, .sector-cell {{ padding: 5px 6px; font-size: 12px; }}
+      .sector-label {{ grid-template-columns: 40px minmax(0, 1fr); gap: 6px; }}
+    }}
+    @media (max-width: 560px) {{
+      .topbar {{ align-items: flex-start; padding: 10px 14px; }}
+      .operation-status {{ margin-left: 0; text-align: left; width: 100%; }}
+      .index-strip, .market-state, .logs, main {{ padding: 0 12px; }}
+      .index-strip, .metric-grid, .cards {{ grid-template-columns: 1fr; }}
+      .sector-heatmap {{ grid-template-columns: 64px repeat(2, minmax(64px, 1fr)); }}
+      .sector-label span {{ display: none; }}
+      .sector-label {{ display: flex; justify-content: center; }}
+      .sector-label b {{ text-align: center; }}
     }}
   </style>
 </head>
@@ -347,43 +407,78 @@ def render_metric_card(row: dict) -> str:
     </article>"""
 
 
-def render_metric_pill(row: dict) -> str:
-    return f"<div class='pill {esc(row['status'])}'><strong>{esc(metric_title(row['metric_id']))}</strong><br>{esc(row['label'] or 'N/A')}{render_metric_delta(row)}</div>"
-
-
 def render_index_card(row: dict) -> str:
     change = row["change_1d"]
     change_text = "N/A" if change is None else f"{change:.2%}"
-    return f"<article class='index-card'><strong>{esc(row['symbol'])}</strong><div class='big'>{row['close']:.2f}</div><span>{esc(change_text)}</span></article>"
-
-
-def render_sector_tile(row: dict) -> str:
-    ret_1w = row["return_1w"]
-    ret_1m = row["return_1m"]
-    if ret_1w is None:
-        color = "#edf0f4"
-        text_1w = "N/A"
-    else:
-        color = return_color(float(ret_1w))
-        text_1w = f"{ret_1w:.1%}"
-    text_1m = "N/A" if ret_1m is None else f"{ret_1m:.1%}"
+    change_class = delta_class(change)
+    spark_color = "var(--green)" if change is not None and change >= 0 else "var(--red)"
     return (
-        f"<div class='sector' style='background:{color}'>"
-        f"<strong>{esc(row['symbol'])}</strong><br>{esc(row['sector'])}<br>"
-        f"<b>{text_1w}</b><br><span class='muted'>1M {text_1m}</span></div>"
+        "<article class='index-card'>"
+        f"<strong>{esc(row['symbol'])}</strong>"
+        f"<div class='big'>{row['close']:.2f}</div>"
+        f"<span class='{change_class}'>{esc(change_text)}</span>"
+        f"{render_sparkline(row.get('history') or [], spark_color)}"
+        "</article>"
     )
 
 
-def render_sector_groups(rows: list[dict]) -> str:
-    positive = [row for row in rows if row.get("return_1w") is not None and row["return_1w"] >= 0]
-    negative = [row for row in rows if row.get("return_1w") is None or row["return_1w"] < 0]
-    positive_tiles = "".join(render_sector_tile(row) for row in positive) or '<p class="muted">No positive sectors.</p>'
-    negative_tiles = "".join(render_sector_tile(row) for row in negative) or '<p class="muted">No negative sectors.</p>'
+def delta_class(value: float | None) -> str:
+    if value is None:
+        return "delta-flat"
+    if value > 0:
+        return "delta-up"
+    if value < 0:
+        return "delta-down"
+    return "delta-flat"
+
+
+def render_sector_heatmap(rows: list[dict]) -> str:
+    if not rows:
+        return "<p>No sector performance data available yet.</p>"
+    ordered = sorted(rows, key=lambda row: none_last(row.get("return_1w")), reverse=True)
+    body = [
+        "<div class='sector-head'></div><div class='sector-head'>1W</div><div class='sector-head'>1M</div>"
+    ]
+    for row in ordered:
+        body.append(
+            f"<div class='sector-label'><b>{esc(row['symbol'])}</b><span>{esc(row['sector'])}</span></div>"
+            f"{render_sector_cell(row.get('return_1w'))}"
+            f"{render_sector_cell(row.get('return_1m'))}"
+        )
+    return "<div class='sector-heatmap'>" + "".join(body) + "</div>"
+
+
+def render_sector_cell(value: float | None) -> str:
+    if value is None:
+        return "<div class='sector-cell' style='background:#edf0f4'>N/A</div>"
+    return f"<div class='sector-cell' style='background:{return_color(float(value))}'>{value:.1%}</div>"
+
+
+def none_last(value: float | None) -> float:
+    return -999 if value is None else float(value)
+
+
+def render_sparkline(values: list[float], color: str) -> str:
+    clean = [value for value in values if value is not None]
+    if len(clean) < 2:
+        return "<svg class='sparkline' viewBox='0 0 120 34' role='img' aria-label='No sparkline data'></svg>"
+    min_value = min(clean)
+    max_value = max(clean)
+    span = max_value - min_value
+    if span == 0:
+        span = 1
+    points = []
+    for index, value in enumerate(clean):
+        x = index / (len(clean) - 1) * 118 + 1
+        y = 31 - ((value - min_value) / span * 26)
+        points.append((x, y))
+    line = " ".join(f"{x:.1f},{y:.1f}" for x, y in points)
+    fill = f"1,33 {line} 119,33"
     return (
-        "<div class='sector-groups'>"
-        f"<div class='sector-group sector-positive'><h3>Positive 1W</h3><div class='heatmap'>{positive_tiles}</div></div>"
-        f"<div class='sector-group sector-negative'><h3>Negative 1W</h3><div class='heatmap'>{negative_tiles}</div></div>"
-        "</div>"
+        "<svg class='sparkline' viewBox='0 0 120 34' preserveAspectRatio='none' role='img' aria-label='20-day close sparkline'>"
+        f"<path class='fill' d='M {fill} Z' fill='{esc(color)}'></path>"
+        f"<path class='line' d='M {line}' stroke='{esc(color)}'></path>"
+        "</svg>"
     )
 
 
