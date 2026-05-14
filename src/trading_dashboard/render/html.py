@@ -576,6 +576,7 @@ def render_hits_table(hits: list[dict]) -> str:
             f"{sort_cell('perf_1m', hit['perf_1m'], fmt(hit['perf_1m'], '{:.1%}'), 'number')}"
             f"{sort_cell('ma_distance', hit.get('ma_distance_pct'), fmt(hit.get('ma_distance_pct'), '{:.1%}'), 'number')}"
             f"{sort_cell('atr', hit['atr_pct'], fmt(hit['atr_pct'], '{:.1%}'), 'number')}"
+            f"{sort_cell('avg_volume', hit.get('avg_volume_50d'), fmt_volume(hit.get('avg_volume_50d')), 'number')}"
             f"{sort_cell('distance_52w', hit['distance_to_52w_high'], fmt(hit['distance_to_52w_high'], '{:.1%}'), 'number')}"
             f"{sort_cell('also_in', hit.get('also_in') or '', render_scanner_tags(hit.get('also_in') or ''))}"
             "</tr>"
@@ -601,6 +602,7 @@ def render_hits_table(hits: list[dict]) -> str:
         f"{sort_header('1M', 'perf_1m', 'descending')}"
         f"{sort_header('MA Dist', 'ma_distance', 'ascending')}"
         f"{sort_header('ATR%', 'atr', 'descending')}"
+        f"{sort_header('Avg Vol', 'avg_volume', 'descending')}"
         f"{sort_header('52W Dist', 'distance_52w', 'descending')}"
         f"{sort_header('Also In', 'also_in', 'ascending')}"
         "</tr></thead><tbody>"
@@ -747,6 +749,16 @@ def return_color(value: float) -> str:
 
 def fmt(value: float | None, pattern: str) -> str:
     return "N/A" if value is None else pattern.format(value)
+
+
+def fmt_volume(value: float | None) -> str:
+    if value is None:
+        return "N/A"
+    if value >= 1_000_000:
+        return f"{value / 1_000_000:.1f}M"
+    if value >= 1_000:
+        return f"{value / 1_000:.0f}K"
+    return f"{value:.0f}"
 
 
 def esc(value: object) -> str:

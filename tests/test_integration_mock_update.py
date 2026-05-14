@@ -72,6 +72,7 @@ def test_scanner_filter_markup_is_rendered():
                 "perf_1m": 0.05,
                 "ma_distance_pct": -0.01,
                 "atr_pct": 0.02,
+                "avg_volume_50d": 1_250_000,
                 "distance_to_52w_high": -0.03,
                 "also_in": "Pullback MA20",
                 "trigger_note": "Close near SMA10 in an uptrend",
@@ -87,6 +88,7 @@ def test_scanner_filter_markup_is_rendered():
                 "perf_1m": 0.03,
                 "ma_distance_pct": 0.01,
                 "atr_pct": 0.02,
+                "avg_volume_50d": 850_000,
                 "distance_to_52w_high": -0.04,
                 "also_in": "Pullback MA10",
                 "trigger_note": "Close near SMA20 in an uptrend",
@@ -110,6 +112,7 @@ def test_scanner_filter_markup_is_rendered():
     assert "class='tag-list'" in html
     assert "data-sort-key='perf_1w' data-sort-default='descending' title='Sort by 1W'>1W</button>" in html
     assert "data-sort-key='perf_1m' data-sort-default='descending' title='Sort by 1M'>1M</button>" in html
+    assert "data-sort-key='avg_volume' data-sort-default='descending' title='Sort by Avg Vol'>Avg Vol</button>" in html
     assert "<th>Trigger</th>" not in html
     assert "data-tooltip='Close near SMA10 in an uptrend'" in html
     assert "data-sort-key='rs'" in html
@@ -117,9 +120,12 @@ def test_scanner_filter_markup_is_rendered():
     assert "data-sort-key='perf_1w'" in html
     assert "data-sort-key='perf_1m'" in html
     assert "data-sort-key='ma_distance'" in html
+    assert "data-sort-key='avg_volume'" in html
     assert "data-sort-cell='rs' data-sort-type='number' data-sort-value='90'" in html
     assert "data-sort-cell='industry' data-sort-type='text' data-sort-value='Technology Hardware'" in html
     assert "data-sort-cell='perf_1w' data-sort-type='number' data-sort-value='0.02'" in html
+    assert "data-sort-cell='avg_volume' data-sort-type='number' data-sort-value='1250000'" in html
+    assert "1.2M" in html
 
 
 def test_sector_heatmap_orders_by_weekly_returns_and_shows_two_periods():

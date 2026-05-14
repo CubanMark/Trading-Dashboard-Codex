@@ -7,6 +7,10 @@ from ..compute.indicators import atr, percentile_rank, sma
 
 WARNING = "Research scanner only; Pullback-v2a is not accepted as a tradable edge."
 SCANNER_LIMIT_PER_VARIANT = 25
+MIN_LATEST_CLOSE = 10.0
+MIN_AVG_VOLUME_50D = 750_000
+MIN_RS_RANK = 70.0
+MAX_DISTANCE_TO_52W_HIGH = -0.30
 
 
 def pullback_hits(
@@ -34,6 +38,8 @@ def pullback_hits(
         if industry in EXCLUDED_PULLBACK_SUB_INDUSTRIES:
             continue
         frame = price_map.get(symbol, empty_price_frame())
+        if not passes_relative_strength(ranks.get(symbol)):
+            continue
         for scanner_id, label, ma_window, trigger_note in matching_pullback_variants(frame, spy_ok):
             rows_by_scanner[scanner_id].append(
                 hit_row(symbol, latest_date, frame, ranks.get(symbol), sector, industry, scanner_id, label, ma_window, trigger_note)
@@ -72,16 +78,11 @@ def spy_market_regime(price_map: dict[str, pd.DataFrame]) -> bool:
 
 
 def is_pullback_candidate(frame: pd.DataFrame, spy_ok: bool) -> bool:
-    if not spy_ok or len(frame) < 252:
+    if not base_uptrend_ok(frame, spy_ok):
         return False
     close = frame["close"]
-    ma50 = sma(close, 50)
-    ma200 = sma(close, 200)
-    if pd.isna(ma50.iloc[-1]) or pd.isna(ma200.iloc[-1]):
-        return False
-    trend_ok = close.iloc[-1] > ma50.iloc[-1] > ma200.iloc[-1]
     three_down = close.iloc[-1] < close.iloc[-2] < close.iloc[-3] < close.iloc[-4]
-    return bool(trend_ok and three_down)
+    return bool(three_down)
 
 
 def matching_pullback_variants(frame: pd.DataFrame, spy_ok: bool) -> list[tuple[str, str, int | None, str]]:
@@ -101,12 +102,38 @@ def matching_pullback_variants(frame: pd.DataFrame, spy_ok: bool) -> list[tuple[
 def base_uptrend_ok(frame: pd.DataFrame, spy_ok: bool) -> bool:
     if not spy_ok or len(frame) < 252:
         return False
+    if not passes_price_volume_filter(frame) or not near_52w_high(frame):
+        return False
     close = frame["close"]
     ma50 = sma(close, 50)
     ma200 = sma(close, 200)
     if pd.isna(ma50.iloc[-1]) or pd.isna(ma200.iloc[-1]):
         return False
     return bool(close.iloc[-1] > ma50.iloc[-1] > ma200.iloc[-1])
+
+
+def passes_price_volume_filter(frame: pd.DataFrame) -> bool:
+    if len(frame) < 50 or "volume" not in frame:
+        return False
+    latest_close = frame["close"].iloc[-1]
+    avg_volume = frame["volume"].tail(50).mean()
+    if pd.isna(latest_close) or pd.isna(avg_volume):
+        return False
+    return bool(float(latest_close) >= MIN_LATEST_CLOSE and float(avg_volume) >= MIN_AVG_VOLUME_50D)
+
+
+def near_52w_high(frame: pd.DataFrame) -> bool:
+    if len(frame) < 252:
+        return False
+    latest_close = frame["close"].iloc[-1]
+    high_52w = frame["high"].tail(252).max()
+    if pd.isna(latest_close) or pd.isna(high_52w) or high_52w == 0:
+        return False
+    return bool(float(latest_close / high_52w - 1) >= MAX_DISTANCE_TO_52W_HIGH)
+
+
+def passes_relative_strength(rs_rank: float | None) -> bool:
+    return bool(rs_rank is not None and pd.notna(rs_rank) and float(rs_rank) >= MIN_RS_RANK)
 
 
 def near_moving_average(frame: pd.DataFrame, window: int, max_distance_pct: float = 0.02) -> bool:

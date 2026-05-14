@@ -1,6 +1,12 @@
 import pandas as pd
 
-from trading_dashboard.scanners.pullback import annotate_overlaps, is_pullback_candidate, matching_pullback_variants, near_moving_average
+from trading_dashboard.scanners.pullback import (
+    annotate_overlaps,
+    is_pullback_candidate,
+    matching_pullback_variants,
+    near_moving_average,
+    passes_relative_strength,
+)
 
 
 def test_pullback_candidate_requires_spy_regime():
@@ -25,6 +31,24 @@ def test_near_moving_average_rejects_far_pullback():
     frame = make_trending_frame()
     frame.loc[frame.index[-1], "close"] = frame["close"].iloc[-1] * 0.8
     assert not near_moving_average(frame, 10)
+
+
+def test_variants_require_liquid_priceable_stock():
+    frame = make_trending_frame()
+    frame["volume"] = 100_000
+    assert matching_pullback_variants(frame, spy_ok=True) == []
+
+
+def test_variants_require_near_52w_high():
+    frame = make_trending_frame()
+    frame.loc[frame.index[-1], "close"] = frame["close"].iloc[-1] * 0.65
+    assert matching_pullback_variants(frame, spy_ok=True) == []
+
+
+def test_relative_strength_gate_requires_top_rank():
+    assert passes_relative_strength(70)
+    assert not passes_relative_strength(69.9)
+    assert not passes_relative_strength(None)
 
 
 def test_annotate_overlaps_lists_other_scanners_for_same_symbol():

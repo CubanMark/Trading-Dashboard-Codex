@@ -77,6 +77,8 @@ Neu gehaertet:
 
 Der Pullback-Research-Scanner ist als Watchlist-/Research-Ausgabe umgesetzt, nicht als akzeptierter handelbarer Edge.
 
+Die fachlichen Regeln sind dokumentiert in `docs/pullback_scanner_rules.md`.
+
 Aktuelle Varianten:
 
 - `3D Pullback`
@@ -86,10 +88,22 @@ Aktuelle Varianten:
 Scanner-Tabelle:
 
 - sortierbar nach Setup, Ticker, Sector, Industry, Relative Strength, 1W, 1M, MA Distance, ATR, 52W Distance und Also In
+- zeigt jetzt auch das durchschnittliche 50-Tage-Volumen (`Avg Vol`)
 - Setup wird als farbiger Chip angezeigt
 - Trigger-Hinweis erscheint im Hover-Tooltip des Setup-Chips
 - `Also In` zeigt Ueberschneidungen als farbige Chips
 - Filter fuer Setup, Sector und Industry sind gekoppelt: die Dropdown-Optionen reagieren auf die jeweils aktiven anderen Filter
+
+Aktive Pullback-Basisfilter:
+
+- SPY ueber SMA200
+- Aktie ueber SMA50, SMA50 ueber SMA200
+- letzter Schlusskurs mindestens 10 USD
+- durchschnittliches 50-Tage-Volumen mindestens 750.000 Aktien
+- RS-Rang mindestens 70
+- Schlusskurs maximal 30% unter 52W-Hoch
+
+Letzter lokaler Compute/Render nach Schaerfung: 62 Research Hits.
 
 ## Wichtige Entscheidungen
 
