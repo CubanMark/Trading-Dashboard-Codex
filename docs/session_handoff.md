@@ -33,6 +33,9 @@ Zusaetzliche lokale Verifikation:
 ```powershell
 $env:PYTHONPATH='src'; python -m trading_dashboard update --mock --years 2
 # erfolgreich; benoetigte wegen gesperrtem db/-Schreibzugriff eine einmalige Eskalation
+
+$env:PYTHONPATH='src'; python -m trading_dashboard update --years 1
+# erfolgreich mit yfinance; Dashboard-Datenstand 2026-05-13
 ```
 
 ## Dashboard-Status
@@ -55,6 +58,8 @@ Neu gehaertet:
 - Data-Quality-Log umfasst jetzt Missing Symbols mit Beispielen, stale Symbols mit Beispielen, nonpositive OHLC, unplausible OHLC-Beziehungen, extreme Tagesrenditen und Universe Coverage.
 - Compute loggt zusaetzlich Coverage fuer die tatsaechlich verwendeten Equity-Symbole und Mapping-Luecken fuer Sector/Industry.
 - Aktueller Mock-Lauf: 1244 aktive Equities, 1244 geladen, 1244 mit >= 220 Zeilen; 2 Industry-Mapping-Luecken (`PINS`, `ULS`).
+- yfinance-Daily-Fetch filtert den laufenden Kalendertag heraus, damit keine intraday/unfertigen Tagesbalken in ein EOD-Dashboard geraten. Das behob eine falsche `invalid_ohlc`-Warnung fuer 2026-05-14.
+- Aktueller yfinance-Lauf: Datenstand 2026-05-13, 1244 aktive Equities, 1244 geladen, 0 invalid OHLC, 0 nonpositive OHLC, 0 stale Symbols.
 
 ## Scanner-Status
 
@@ -99,6 +104,7 @@ Hohe Prioritaet:
 - yfinance-Teilfehler muessen im echten Datenlauf noch beobachtet werden; Mock- und Fallback-Pfade sind sichtbar, aber echte Provider-Ausfaelle brauchen einen Live-Run.
 - Source-Status zeigt aktuell Quellen und Mock/Fallback-Warnung, aber noch keinen letzten Datenstand je Einzelsymbol/Quelle.
 - Universe-Abdeckung ist geloggt; als naechstes sollten die zwei Mapping-Luecken (`PINS`, `ULS`) fachlich korrigiert oder bewusst dokumentiert werden.
+- Extreme Tagesrenditen werden aktuell nur gemeldet, noch nicht gegen Corporate Actions klassifiziert. Letzter yfinance-Lauf zeigte 14 Faelle (`AAP`, `APLS`, `ASGN`, `CORT`, `HTZ`, ...).
 
 Mittlere Prioritaet:
 
@@ -108,10 +114,10 @@ Mittlere Prioritaet:
 
 ## Empfohlene naechste Schritte
 
-1. Echten yfinance-Lauf beobachten:
-   - pruefen, ob Missing/Stale/Extreme/Invalid-Checks bei realen Daten brauchbar anschlagen
-   - bei Teilfehlern Beispiele im Dashboard bewerten
-   - keine erfundenen Fallback-Werte einfuehren
+1. Extreme Tagesrenditen einordnen:
+   - Beispiele aus `extreme_daily_returns` gegen Corporate Actions/Splits pruefen
+   - entscheiden, ob Split-bedingte Bewegungen separat gelabelt werden sollen
+   - keine Adjusted-Werte heimlich einmischen; Phase-1-Entscheidung bleibt unadjusted + Corporate Actions separat
 
 2. Source-Status weiter praezisieren:
    - letzter Datenstand je Quelle sichtbar machen

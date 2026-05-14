@@ -106,6 +106,7 @@ def yfinance_batch(yf, symbols: list[str], start: date) -> tuple[list[pd.DataFra
         if not required.issubset(part.columns):
             continue
         frame = part.reset_index().rename(columns={"Date": "date", "index": "date"})
+        frame = drop_current_session(frame)
         frame["symbol"] = symbol
         price_frames.append(frame[["symbol", "date", "open", "high", "low", "close", "volume"]].dropna(subset=["close"]))
         for action_col in ["dividends", "stock splits"]:
@@ -117,6 +118,12 @@ def yfinance_batch(yf, symbols: list[str], start: date) -> tuple[list[pd.DataFra
                     action_rows.append({"symbol": symbol, "date": action_date, "action_type": action_type, "value": float(value)})
 
     return price_frames, action_rows
+
+
+def drop_current_session(frame: pd.DataFrame) -> pd.DataFrame:
+    today = pd.Timestamp.today().normalize()
+    dates = pd.to_datetime(frame["date"]).dt.tz_localize(None)
+    return frame.loc[dates < today].copy()
 
 
 def chunks(values: list[str], size: int) -> list[list[str]]:
