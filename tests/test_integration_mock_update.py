@@ -26,6 +26,7 @@ def test_mock_update_creates_db_and_html():
     assert "Dimension Snapshot" not in html
     assert "research scanner only" in html
     assert "Price source: mock" in html
+    assert "deterministic mock data" in html
     assert "grid-template-columns: repeat(auto-fill, 118px)" in html
     assert "syncFilterOptions" in html
 

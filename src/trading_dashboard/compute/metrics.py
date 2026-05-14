@@ -22,6 +22,7 @@ def compute_all_metrics(settings: Settings) -> None:
     equity_symbols = settings.equity_symbols
     price_map = price_frames_by_symbol(prices)
     symbol_meta = load_symbol_metadata(settings)
+    log_compute_quality(settings, price_map, equity_symbols, symbol_meta)
     metric_rows = dimension_metric_rows(price_map, latest_date, equity_symbols)
     sector_rows = sector_return_rows(price_map, latest_date)
     scanner_rows = pullback_hits(price_map, latest_date, equity_symbols, symbol_meta)
@@ -320,6 +321,56 @@ def load_symbol_metadata(settings: Settings) -> dict[str, tuple[str | None, str 
     with connect(settings.db_path) as conn:
         rows = conn.execute("SELECT symbol, sector, industry FROM symbols WHERE asset_class = 'equity' AND active = 1").fetchall()
     return {row["symbol"]: (row["sector"], row["industry"]) for row in rows}
+
+
+def log_compute_quality(
+    settings: Settings,
+    price_map: dict[str, pd.DataFrame],
+    equity_symbols: list[str],
+    symbol_meta: dict[str, tuple[str | None, str | None]],
+) -> None:
+    expected = set(equity_symbols)
+    priced = {symbol for symbol in expected if symbol in price_map and not price_map[symbol].empty}
+    sufficient = {
+        symbol
+        for symbol in priced
+        if len(price_map[symbol]) >= 220 and pd.notna(price_map[symbol]["close"].iloc[-1])
+    }
+    missing = sorted(expected - priced)
+    short = sorted(priced - sufficient)
+    status = "ok" if not missing and len(sufficient) >= max(1, int(len(expected) * 0.90)) else "warning"
+    log_quality(
+        settings.db_path,
+        "compute_universe_coverage",
+        status,
+        (
+            f"{len(expected)} active equities; {len(priced)} priced; {len(sufficient)} with >= 220 rows"
+            f"{quality_examples(missing, 'missing')}"
+            f"{quality_examples(short, 'short')}"
+        ),
+    )
+
+    missing_sector = sorted(symbol for symbol in expected if not symbol_meta.get(symbol, (None, None))[0])
+    missing_industry = sorted(symbol for symbol in expected if not symbol_meta.get(symbol, (None, None))[1])
+    mapping_status = "ok" if not missing_sector and not missing_industry else "warning"
+    log_quality(
+        settings.db_path,
+        "symbol_mapping_coverage",
+        mapping_status,
+        (
+            f"{len(missing_sector)} equities missing sector; {len(missing_industry)} missing industry"
+            f"{quality_examples(missing_sector, 'sector')}"
+            f"{quality_examples(missing_industry, 'industry')}"
+        ),
+    )
+
+
+def quality_examples(values: list[str], label: str, limit: int = 5) -> str:
+    if not values:
+        return ""
+    shown = ", ".join(values[:limit])
+    more = "" if len(values) <= limit else f", +{len(values) - limit} more"
+    return f"; {label}: {shown}{more}"
 
 
 def value_at_lookback(series: pd.Series, lookback: int) -> float | None:

@@ -17,6 +17,7 @@ def fetch_prices(settings: Settings, use_mock: bool = False) -> None:
         replace_prices(settings.db_path, prices, "mock", settings.all_price_symbols)
         replace_actions(settings.db_path, actions, "mock", settings.all_price_symbols)
         log_quality(settings.db_path, "fetch_source", "warning", "Used deterministic mock price data")
+        quality_check_prices(settings, prices, "mock")
         return
 
     try:
@@ -156,17 +157,91 @@ def quality_check_prices(settings: Settings, prices: pd.DataFrame, source: str) 
     if prices.empty:
         log_quality(settings.db_path, "prices_present", "error", f"No prices from {source}")
         return
+    prices = prices.copy()
+    prices["date"] = pd.to_datetime(prices["date"])
+    log_quality(settings.db_path, "prices_present", "ok", f"{len(prices)} price rows from {source}")
+
     missing_close = int(prices["close"].isna().sum())
     status = "ok" if missing_close == 0 else "warning"
     log_quality(settings.db_path, "missing_close", status, f"{missing_close} missing close values from {source}")
+
     fetched_symbols = set(prices["symbol"].unique())
     missing_symbols = sorted(set(settings.all_price_symbols) - fetched_symbols)
     log_quality(
         settings.db_path,
         "missing_symbols",
         "ok" if not missing_symbols else "warning",
-        f"{len(missing_symbols)} symbols missing from {source}",
+        f"{len(missing_symbols)} symbols missing from {source}{example_suffix(missing_symbols)}",
     )
+
     latest_by_symbol = prices.groupby("symbol")["date"].max()
     stale = latest_by_symbol[latest_by_symbol < latest_by_symbol.max() - pd.Timedelta(days=10)]
-    log_quality(settings.db_path, "stale_symbols", "ok" if stale.empty else "warning", f"{len(stale)} stale symbols")
+    stale_symbols = sorted(stale.index.astype(str).tolist())
+    log_quality(
+        settings.db_path,
+        "stale_symbols",
+        "ok" if stale.empty else "warning",
+        f"{len(stale_symbols)} stale symbols{example_suffix(stale_symbols)}",
+    )
+
+    price_cols = ["open", "high", "low", "close"]
+    nonpositive_mask = prices[price_cols].le(0).any(axis=1)
+    nonpositive_symbols = sorted(prices.loc[nonpositive_mask, "symbol"].astype(str).unique().tolist())
+    log_quality(
+        settings.db_path,
+        "nonpositive_prices",
+        "ok" if not nonpositive_symbols else "error",
+        f"{int(nonpositive_mask.sum())} rows with nonpositive OHLC values{example_suffix(nonpositive_symbols)}",
+    )
+
+    invalid_ohlc_mask = (
+        prices["high"].lt(prices["low"])
+        | prices["close"].lt(prices["low"])
+        | prices["close"].gt(prices["high"])
+        | prices["open"].lt(prices["low"])
+        | prices["open"].gt(prices["high"])
+    )
+    invalid_ohlc_symbols = sorted(prices.loc[invalid_ohlc_mask, "symbol"].astype(str).unique().tolist())
+    log_quality(
+        settings.db_path,
+        "invalid_ohlc",
+        "ok" if not invalid_ohlc_symbols else "error",
+        f"{int(invalid_ohlc_mask.sum())} rows with invalid OHLC relationships{example_suffix(invalid_ohlc_symbols)}",
+    )
+
+    returns = prices.sort_values(["symbol", "date"]).groupby("symbol")["close"].pct_change()
+    extreme_mask = returns.abs().gt(0.50).fillna(False)
+    extreme_symbols = sorted(prices.loc[extreme_mask, "symbol"].astype(str).unique().tolist())
+    log_quality(
+        settings.db_path,
+        "extreme_daily_returns",
+        "ok" if not extreme_symbols else "warning",
+        f"{int(extreme_mask.sum())} rows with absolute daily return > 50%{example_suffix(extreme_symbols)}",
+    )
+
+    equity_symbols = set(settings.equity_symbols)
+    equity_counts = prices[prices["symbol"].isin(equity_symbols)].groupby("symbol").size()
+    min_history = min(220, max(50, settings.years * 180))
+    sufficient_history = int((equity_counts >= min_history).sum())
+    missing_equities = sorted(equity_symbols - set(equity_counts.index))
+    short_history = sorted(equity_counts[equity_counts < min_history].index.astype(str).tolist())
+    status = "ok" if not missing_equities and not short_history else "warning"
+    log_quality(
+        settings.db_path,
+        "universe_coverage",
+        status,
+        (
+            f"{len(equity_symbols)} active equities expected; {len(equity_counts)} loaded; "
+            f"{sufficient_history} with >= {min_history} rows"
+            f"{example_suffix(missing_equities, 'missing')}"
+            f"{example_suffix(short_history, 'short')}"
+        ),
+    )
+
+
+def example_suffix(values: list[str], label: str = "examples", limit: int = 5) -> str:
+    if not values:
+        return ""
+    shown = ", ".join(values[:limit])
+    more = "" if len(values) <= limit else f", +{len(values) - limit} more"
+    return f"; {label}: {shown}{more}"

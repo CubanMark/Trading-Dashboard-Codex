@@ -91,6 +91,7 @@ def render_index(data: dict) -> str:
     industry_leadership = render_industry_leadership(data["industries"])
     hits = render_hits_table(data["hits"])
     logs = render_logs(data)
+    source_notice = render_source_notice(data["sources"])
     return page(
         "Market Dashboard",
         f"""
@@ -100,6 +101,7 @@ def render_index(data: dict) -> str:
           <span>Data: {esc(data["latest_date"])}</span>
           <span>{esc(source_summary(data["sources"]))}</span>
         </header>
+        {source_notice}
         <section class="index-strip">{index_cards}</section>
         <section class="state-strip">
           <h1>Market State</h1>
@@ -208,6 +210,7 @@ def page(title: str, body: str) -> str:
     th button[aria-sort="descending"]::after {{ content: "v"; color: var(--blue); font-size: 12px; line-height: 1; }}
     .muted {{ color: var(--muted); }}
     .warning {{ color: #8a5a00; font-weight: 600; }}
+    .source-notice {{ max-width: 1180px; margin: 18px auto 0; padding: 12px 18px; border: 1px solid #f0c36a; border-left: 5px solid #b58200; border-radius: 8px; background: #fff7e0; color: #583b00; font-weight: 700; }}
     .scanner-toolbar {{ display: flex; align-items: center; gap: 10px; margin: 10px 0 12px; flex-wrap: wrap; }}
     .scanner-toolbar label {{ font-size: 13px; color: var(--muted); font-weight: 700; }}
     .scanner-toolbar select {{ border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--text); padding: 7px 10px; font-size: 14px; }}
@@ -505,6 +508,15 @@ def render_logs(data: dict) -> str:
     run_items = "".join(f"<li>{esc(row['run_at'])}: {esc(row['step'])} - {esc(row['status'])}</li>" for row in data["runs"])
     quality_items = "".join(f"<li>{esc(row['checked_at'])}: {esc(row['check_name'])} - {esc(row['status'])}: {esc(row['message'])}</li>" for row in data["quality"])
     return f"<div class='loggrid'><section><h2>Runs</h2><ul>{run_items}</ul></section><section><h2>Data Quality</h2><ul>{quality_items}</ul></section></div>"
+
+
+def render_source_notice(sources: list[dict]) -> str:
+    names = {str(row["source"]) for row in sources}
+    if "mock-fallback" in names:
+        return "<div class='source-notice'>Warning: yfinance failed and this build used mock-fallback data. Do not read scanner hits as current market output.</div>"
+    if "mock" in names and "yfinance" not in names:
+        return "<div class='source-notice'>Warning: this build uses deterministic mock data. Values are for pipeline validation only.</div>"
+    return ""
 
 
 def source_summary(sources: list[dict]) -> str:

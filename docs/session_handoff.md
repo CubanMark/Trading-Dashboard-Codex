@@ -1,6 +1,6 @@
 # Session Handoff - Trading Dashboard
 
-Stand: 2026-05-14
+Stand: 2026-05-14, Update nach Data-Quality-Haertung
 Phase: 1 MVP
 Baseline-Commit: `e9e41bb Create phase 1 MVP baseline`
 
@@ -25,7 +25,14 @@ Letzte bekannte Verifikation:
 
 ```powershell
 $env:PYTHONPATH='src'; python -m pytest -q -p no:cacheprovider
-# 14 passed
+# 15 passed
+```
+
+Zusaetzliche lokale Verifikation:
+
+```powershell
+$env:PYTHONPATH='src'; python -m trading_dashboard update --mock --years 2
+# erfolgreich; benoetigte wegen gesperrtem db/-Schreibzugriff eine einmalige Eskalation
 ```
 
 ## Dashboard-Status
@@ -40,6 +47,14 @@ Die Homepage zeigt derzeit:
 - Run Status und Data Quality Log
 
 Die redundante `Dimension Snapshot`-Sektion wurde entfernt, weil sie inhaltlich fast identisch zum Market State war.
+
+Neu gehaertet:
+
+- Mock- und yfinance-Fetches laufen durch dieselbe Data-Quality-Pruefung.
+- Dashboard zeigt bei `mock` und `mock-fallback` eine prominente Source-Warnung.
+- Data-Quality-Log umfasst jetzt Missing Symbols mit Beispielen, stale Symbols mit Beispielen, nonpositive OHLC, unplausible OHLC-Beziehungen, extreme Tagesrenditen und Universe Coverage.
+- Compute loggt zusaetzlich Coverage fuer die tatsaechlich verwendeten Equity-Symbole und Mapping-Luecken fuer Sector/Industry.
+- Aktueller Mock-Lauf: 1244 aktive Equities, 1244 geladen, 1244 mit >= 220 Zeilen; 2 Industry-Mapping-Luecken (`PINS`, `ULS`).
 
 ## Scanner-Status
 
@@ -81,10 +96,9 @@ Zielbild ist nicht ein kleines Testuniversum, sondern die 1.500 liquidesten Akti
 
 Hohe Prioritaet:
 
-- Datenqualitaet ist noch zu grob geprueft. Nach dem frueheren VIX/SPY-Problem muessen Sanity Checks deutlich strenger werden.
-- yfinance-Ausfaelle und Teilfehler muessen sichtbarer werden.
-- Der aktuelle Run-Status zeigt Quellen, aber noch nicht genug, ob ein Wert echt, Mock, Fallback oder teilweise fehlend ist.
-- Universe-Abdeckung sollte explizit geloggt werden: erwartete Symbole, geladene Symbole, fehlende Symbole, valide Historie.
+- yfinance-Teilfehler muessen im echten Datenlauf noch beobachtet werden; Mock- und Fallback-Pfade sind sichtbar, aber echte Provider-Ausfaelle brauchen einen Live-Run.
+- Source-Status zeigt aktuell Quellen und Mock/Fallback-Warnung, aber noch keinen letzten Datenstand je Einzelsymbol/Quelle.
+- Universe-Abdeckung ist geloggt; als naechstes sollten die zwei Mapping-Luecken (`PINS`, `ULS`) fachlich korrigiert oder bewusst dokumentiert werden.
 
 Mittlere Prioritaet:
 
@@ -94,23 +108,19 @@ Mittlere Prioritaet:
 
 ## Empfohlene naechste Schritte
 
-1. Datenqualitaetschecks erweitern:
-   - fehlende Symbole mit Beispielen loggen
-   - stale symbols mit Beispielen loggen
-   - extreme Tagesrenditen erkennen
-   - unplausible OHLC-Beziehungen erkennen: `high < low`, `close` ausserhalb `low/high`, negative oder Null-Preise
-   - Universe Coverage Check: wie viele Equity-Symbole sind aktiv, wie viele haben ausreichende Historie
+1. Echten yfinance-Lauf beobachten:
+   - pruefen, ob Missing/Stale/Extreme/Invalid-Checks bei realen Daten brauchbar anschlagen
+   - bei Teilfehlern Beispiele im Dashboard bewerten
+   - keine erfundenen Fallback-Werte einfuehren
 
-2. Run-/Source-Status im Dashboard praezisieren:
-   - klar anzeigen: `yfinance`, `mock`, `mock-fallback`
-   - Warnung bei Mock/Fallback prominenter machen
+2. Source-Status weiter praezisieren:
    - letzter Datenstand je Quelle sichtbar machen
+   - optional Anzahl Symbole pro Quelle und max/min Datum im Dashboard zeigen
 
 3. Universe-Workflow stabilisieren:
-   - `sp1500_universe_filtered.csv` validieren
+   - `PINS` und `ULS` Industry-Mapping-Luecken klaeren
    - Liquiditaetsfilter dokumentieren
-   - Mapping-Luecken fuer Sector/Industry loggen
-   - Anzahl verwendeter Werte in Breadth und Scanner transparent anzeigen
+   - Anzahl verwendeter Werte in Breadth und Scanner noch prominenter machen
 
 4. Danach erst Detailseiten ausbauen:
    - Breadth-Historie
@@ -157,4 +167,3 @@ Vor dem Commit pruefen:
 ```powershell
 git status --short
 ```
-
