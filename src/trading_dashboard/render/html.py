@@ -108,7 +108,6 @@ def render_index(data: dict) -> str:
         <header class="topbar">
           <strong>Market Dashboard</strong>
           <nav>{nav_links()}</nav>
-          <span>Data: {esc(data["latest_date"])}</span>
           <span class="operation-status">{esc(data["operation"])}</span>
         </header>
         {source_notice}
