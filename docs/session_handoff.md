@@ -60,6 +60,10 @@ Neu gehaertet:
 - Aktueller Mock-Lauf: 1244 aktive Equities, 1244 geladen, 1244 mit >= 220 Zeilen; 2 Industry-Mapping-Luecken (`PINS`, `ULS`).
 - yfinance-Daily-Fetch filtert den laufenden Kalendertag heraus, damit keine intraday/unfertigen Tagesbalken in ein EOD-Dashboard geraten. Das behob eine falsche `invalid_ohlc`-Warnung fuer 2026-05-14.
 - Aktueller yfinance-Lauf: Datenstand 2026-05-13, 1244 aktive Equities, 1244 geladen, 0 invalid OHLC, 0 nonpositive OHLC, 0 stale Symbols.
+- Manuelle Universe-Klassifikations-Overrides:
+  - `ULS`: Commercial Services / Miscellaneous Commercial Services
+  - `PINS`: Technology Services / Internet Software / Services
+  Nach Recompute/Render: `symbol_mapping_coverage` ist `ok` mit 0 fehlenden Sector/Industry-Werten.
 
 ## Scanner-Status
 
@@ -103,7 +107,6 @@ Hohe Prioritaet:
 
 - yfinance-Teilfehler muessen im echten Datenlauf noch beobachtet werden; Mock- und Fallback-Pfade sind sichtbar, aber echte Provider-Ausfaelle brauchen einen Live-Run.
 - Source-Status zeigt aktuell Quellen und Mock/Fallback-Warnung, aber noch keinen letzten Datenstand je Einzelsymbol/Quelle.
-- Universe-Abdeckung ist geloggt; als naechstes sollten die zwei Mapping-Luecken (`PINS`, `ULS`) fachlich korrigiert oder bewusst dokumentiert werden.
 - Extreme Tagesrenditen werden aktuell nur gemeldet, noch nicht gegen Corporate Actions klassifiziert. Letzter yfinance-Lauf zeigte 14 Faelle (`AAP`, `APLS`, `ASGN`, `CORT`, `HTZ`, ...).
 
 Mittlere Prioritaet:
@@ -124,7 +127,6 @@ Mittlere Prioritaet:
    - optional Anzahl Symbole pro Quelle und max/min Datum im Dashboard zeigen
 
 3. Universe-Workflow stabilisieren:
-   - `PINS` und `ULS` Industry-Mapping-Luecken klaeren
    - Liquiditaetsfilter dokumentieren
    - Anzahl verwendeter Werte in Breadth und Scanner noch prominenter machen
 

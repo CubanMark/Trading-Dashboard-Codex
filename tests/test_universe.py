@@ -21,3 +21,22 @@ def test_universe_loader_filters_and_normalizes_symbols():
 
 def test_normalize_yahoo_symbol_replaces_dot_with_dash():
     assert normalize_yahoo_symbol("BRK.B") == "BRK-B"
+
+
+def test_universe_loader_applies_manual_classification_overrides():
+    tmp_dir = Path(".tmp_tests")
+    tmp_dir.mkdir(exist_ok=True)
+    path = tmp_dir / f"universe-{uuid4().hex}.csv"
+    path.write_text(
+        "ticker,security,gics_sector,gics_sub_industry,index_membership,rows,last_close,median_dv_126d,passes\n"
+        "PINS,Pinterest,Communication Services,,S&P 400,300,100,100000000,True\n"
+        "ULS,UL Solutions,Industrials,,S&P 400,300,100,100000000,True\n",
+        encoding="utf-8",
+    )
+
+    rows = {row["symbol"]: row for row in load_equity_universe(path)}
+
+    assert rows["PINS"]["sector"] == "Technology Services"
+    assert rows["PINS"]["industry"] == "Internet Software / Services"
+    assert rows["ULS"]["sector"] == "Commercial Services"
+    assert rows["ULS"]["industry"] == "Miscellaneous Commercial Services"
