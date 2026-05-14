@@ -26,6 +26,8 @@ def test_mock_update_creates_db_and_html():
     assert "Dimension Snapshot" not in html
     assert "research scanner only" in html
     assert "mock | data" in html
+    assert 'class="operation-status"' in html
+    assert ".operation-status { margin-left: auto; text-align: right; font-size: 12px;" in html
     assert "equities 2/2" in html
     assert "OHLC ok" in html
     assert "deterministic mock data" in html

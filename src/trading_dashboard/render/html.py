@@ -109,7 +109,7 @@ def render_index(data: dict) -> str:
           <strong>Market Dashboard</strong>
           <nav>{nav_links()}</nav>
           <span>Data: {esc(data["latest_date"])}</span>
-          <span>{esc(data["operation"])}</span>
+          <span class="operation-status">{esc(data["operation"])}</span>
         </header>
         {source_notice}
         <section class="index-strip">{index_cards}</section>
@@ -187,6 +187,7 @@ def page(title: str, body: str) -> str:
     a {{ color: var(--blue); text-decoration: none; }}
     .topbar {{ min-height: 58px; display: flex; align-items: center; gap: 20px; padding: 0 24px; border-bottom: 1px solid var(--line); background: var(--panel); flex-wrap: wrap; }}
     nav {{ display: flex; gap: 12px; flex-wrap: wrap; font-size: 14px; }}
+    .operation-status {{ margin-left: auto; text-align: right; font-size: 12px; line-height: 1.35; color: var(--muted); }}
     .index-strip, .state-strip, .logs, main {{ max-width: 1180px; margin: 18px auto; padding: 0 18px; }}
     .index-strip {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }}
     .index-card, .metric-card, section, .state-strip {{ background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 16px; }}
