@@ -25,7 +25,9 @@ def test_mock_update_creates_db_and_html():
     assert "Industry Leadership" in html
     assert "Dimension Snapshot" not in html
     assert "research scanner only" in html
-    assert "Price source: mock" in html
+    assert "mock | data" in html
+    assert "equities 2/2" in html
+    assert "OHLC ok" in html
     assert "deterministic mock data" in html
     assert "grid-template-columns: repeat(auto-fill, 118px)" in html
     assert "syncFilterOptions" in html

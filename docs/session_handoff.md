@@ -25,7 +25,7 @@ Letzte bekannte Verifikation:
 
 ```powershell
 $env:PYTHONPATH='src'; python -m pytest -q -p no:cacheprovider
-# 15 passed
+# 19 passed
 ```
 
 Zusaetzliche lokale Verifikation:
@@ -36,6 +36,7 @@ $env:PYTHONPATH='src'; python -m trading_dashboard update --mock --years 2
 
 $env:PYTHONPATH='src'; python -m trading_dashboard update --years 1
 # erfolgreich mit yfinance; Dashboard-Datenstand 2026-05-13
+# letzter Lauf meldete ANF und BAC als fehlende yfinance-Downloads
 ```
 
 ## Dashboard-Status
@@ -64,6 +65,10 @@ Neu gehaertet:
   - `ULS`: Commercial Services / Miscellaneous Commercial Services
   - `PINS`: Technology Services / Internet Software / Services
   Nach Recompute/Render: `symbol_mapping_coverage` ist `ok` mit 0 fehlenden Sector/Industry-Werten.
+- EOD-Cutoff nutzt New-York-Zeit: vor 17:30 ET wird der aktuelle Tagesbalken entfernt, nach 17:30 ET bleibt er erlaubt.
+- Dashboard-Topbar zeigt eine kompakte Betriebszeile: Quelle, letztes Daten-Datum, Equity-Coverage, OHLC-Status und Return-Warnungen.
+- Extreme Tagesrenditen werden getrennt geloggt als `corporate_action_returns` und `extreme_daily_returns`.
+- Scanner-Coverage wird geloggt: letzter echter Lauf 1150 Symbole gescannt, 93 per Industry ausgeschlossen, 75 Research Hits.
 
 ## Scanner-Status
 
@@ -105,9 +110,8 @@ Zielbild ist nicht ein kleines Testuniversum, sondern die 1.500 liquidesten Akti
 
 Hohe Prioritaet:
 
-- yfinance-Teilfehler muessen im echten Datenlauf noch beobachtet werden; Mock- und Fallback-Pfade sind sichtbar, aber echte Provider-Ausfaelle brauchen einen Live-Run.
-- Source-Status zeigt aktuell Quellen und Mock/Fallback-Warnung, aber noch keinen letzten Datenstand je Einzelsymbol/Quelle.
-- Extreme Tagesrenditen werden aktuell nur gemeldet, noch nicht gegen Corporate Actions klassifiziert. Letzter yfinance-Lauf zeigte 14 Faelle (`AAP`, `APLS`, `ASGN`, `CORT`, `HTZ`, ...).
+- yfinance-Teilfehler treten tatsaechlich auf: letzter Lauf meldete `ANF` und `BAC` fehlend; Coverage zeigt deshalb 1242/1244.
+- Extreme Tagesrenditen bleiben fachlich zu klaeren. Letzter yfinance-Lauf: 13 unexplained, 0 corporate-action-related (`AAP`, `APLS`, `ASGN`, `CORT`, `HTZ`, ...).
 
 Mittlere Prioritaet:
 
@@ -119,12 +123,12 @@ Mittlere Prioritaet:
 
 1. Extreme Tagesrenditen einordnen:
    - Beispiele aus `extreme_daily_returns` gegen Corporate Actions/Splits pruefen
-   - entscheiden, ob Split-bedingte Bewegungen separat gelabelt werden sollen
+   - pruefen, ob yfinance Corporate Actions fuer diese Faelle fehlen oder ob die Rohdaten selbst fehlerhaft sind
    - keine Adjusted-Werte heimlich einmischen; Phase-1-Entscheidung bleibt unadjusted + Corporate Actions separat
 
-2. Source-Status weiter praezisieren:
-   - letzter Datenstand je Quelle sichtbar machen
-   - optional Anzahl Symbole pro Quelle und max/min Datum im Dashboard zeigen
+2. yfinance-Fehlermeldungen behandeln:
+   - `ANF` und `BAC` gegen erneuten Lauf/Einzelticker-Fetch pruefen
+   - entscheiden, ob fehlende Symbole retrybar, temporär oder aus dem Universum zu entfernen sind
 
 3. Universe-Workflow stabilisieren:
    - Liquiditaetsfilter dokumentieren

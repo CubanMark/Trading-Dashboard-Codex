@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta
+from zoneinfo import ZoneInfo
 
 import numpy as np
 import pandas as pd
@@ -17,7 +18,7 @@ def fetch_prices(settings: Settings, use_mock: bool = False) -> None:
         replace_prices(settings.db_path, prices, "mock", settings.all_price_symbols)
         replace_actions(settings.db_path, actions, "mock", settings.all_price_symbols)
         log_quality(settings.db_path, "fetch_source", "warning", "Used deterministic mock price data")
-        quality_check_prices(settings, prices, "mock")
+        quality_check_prices(settings, prices, actions, "mock")
         return
 
     try:
@@ -31,7 +32,7 @@ def fetch_prices(settings: Settings, use_mock: bool = False) -> None:
 
     replace_prices(settings.db_path, prices, source, settings.all_price_symbols)
     replace_actions(settings.db_path, actions, source, settings.all_price_symbols)
-    quality_check_prices(settings, prices, source)
+    quality_check_prices(settings, prices, actions, source)
 
 
 def symbol_rows(settings: Settings) -> list[dict]:
@@ -106,7 +107,7 @@ def yfinance_batch(yf, symbols: list[str], start: date) -> tuple[list[pd.DataFra
         if not required.issubset(part.columns):
             continue
         frame = part.reset_index().rename(columns={"Date": "date", "index": "date"})
-        frame = drop_current_session(frame)
+        frame = drop_unfinished_session(frame)
         frame["symbol"] = symbol
         price_frames.append(frame[["symbol", "date", "open", "high", "low", "close", "volume"]].dropna(subset=["close"]))
         for action_col in ["dividends", "stock splits"]:
@@ -120,10 +121,25 @@ def yfinance_batch(yf, symbols: list[str], start: date) -> tuple[list[pd.DataFra
     return price_frames, action_rows
 
 
-def drop_current_session(frame: pd.DataFrame) -> pd.DataFrame:
-    today = pd.Timestamp.today().normalize()
+def drop_unfinished_session(
+    frame: pd.DataFrame,
+    now: datetime | None = None,
+    cutoff: time = time(17, 30),
+) -> pd.DataFrame:
+    now_et = now_in_new_york(now)
+    if now_et.time() >= cutoff:
+        return frame.copy()
+    today = pd.Timestamp(now_et.date())
     dates = pd.to_datetime(frame["date"]).dt.tz_localize(None)
     return frame.loc[dates < today].copy()
+
+
+def now_in_new_york(now: datetime | None = None) -> datetime:
+    zone = ZoneInfo("America/New_York")
+    current = now or datetime.now(tz=zone)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=zone)
+    return current.astimezone(zone)
 
 
 def chunks(values: list[str], size: int) -> list[list[str]]:
@@ -160,7 +176,7 @@ def mock_prices(symbols: list[str], years: int) -> tuple[pd.DataFrame, pd.DataFr
     return pd.concat(frames, ignore_index=True), pd.DataFrame(columns=["symbol", "date", "action_type", "value"])
 
 
-def quality_check_prices(settings: Settings, prices: pd.DataFrame, source: str) -> None:
+def quality_check_prices(settings: Settings, prices: pd.DataFrame, actions: pd.DataFrame | None, source: str) -> None:
     if prices.empty:
         log_quality(settings.db_path, "prices_present", "error", f"No prices from {source}")
         return
@@ -216,14 +232,25 @@ def quality_check_prices(settings: Settings, prices: pd.DataFrame, source: str) 
         f"{int(invalid_ohlc_mask.sum())} rows with invalid OHLC relationships{example_suffix(invalid_ohlc_symbols)}",
     )
 
-    returns = prices.sort_values(["symbol", "date"]).groupby("symbol")["close"].pct_change()
+    sorted_prices = prices.sort_values(["symbol", "date"]).copy()
+    returns = sorted_prices.groupby("symbol")["close"].pct_change()
     extreme_mask = returns.abs().gt(0.50).fillna(False)
-    extreme_symbols = sorted(prices.loc[extreme_mask, "symbol"].astype(str).unique().tolist())
+    extreme_rows = sorted_prices.loc[extreme_mask, ["symbol", "date"]].copy()
+    action_related, unexplained = classify_extreme_returns(extreme_rows, actions)
+    log_quality(
+        settings.db_path,
+        "corporate_action_returns",
+        "ok" if not action_related else "warning",
+        (
+            f"{len(action_related)} rows with absolute daily return > 50% near corporate actions"
+            f"{example_suffix(action_related)}"
+        ),
+    )
     log_quality(
         settings.db_path,
         "extreme_daily_returns",
-        "ok" if not extreme_symbols else "warning",
-        f"{int(extreme_mask.sum())} rows with absolute daily return > 50%{example_suffix(extreme_symbols)}",
+        "ok" if not unexplained else "warning",
+        f"{len(unexplained)} unexplained rows with absolute daily return > 50%{example_suffix(unexplained)}",
     )
 
     equity_symbols = set(settings.equity_symbols)
@@ -252,3 +279,30 @@ def example_suffix(values: list[str], label: str = "examples", limit: int = 5) -
     shown = ", ".join(values[:limit])
     more = "" if len(values) <= limit else f", +{len(values) - limit} more"
     return f"; {label}: {shown}{more}"
+
+
+def classify_extreme_returns(extreme_rows: pd.DataFrame, actions: pd.DataFrame | None) -> tuple[list[str], list[str]]:
+    if extreme_rows.empty:
+        return [], []
+    action_keys = corporate_action_keys(actions)
+    action_related: list[str] = []
+    unexplained: list[str] = []
+    for record in extreme_rows.to_dict("records"):
+        symbol = str(record["symbol"])
+        action_window = action_dates_around(record["date"])
+        target = action_related if any((symbol, day) in action_keys for day in action_window) else unexplained
+        target.append(symbol)
+    return sorted(set(action_related)), sorted(set(unexplained))
+
+
+def corporate_action_keys(actions: pd.DataFrame | None) -> set[tuple[str, str]]:
+    if actions is None or actions.empty:
+        return set()
+    frame = actions.copy()
+    frame["date"] = pd.to_datetime(frame["date"]).dt.strftime("%Y-%m-%d")
+    return {(str(row["symbol"]), str(row["date"])) for row in frame.to_dict("records")}
+
+
+def action_dates_around(value: object) -> list[str]:
+    day = pd.Timestamp(value).normalize()
+    return [(day + pd.Timedelta(days=offset)).strftime("%Y-%m-%d") for offset in (-1, 0, 1)]

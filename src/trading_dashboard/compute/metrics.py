@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 
 import pandas as pd
 
-from ..config import SECTOR_ETFS, Settings
+from ..config import EXCLUDED_PULLBACK_SUB_INDUSTRIES, SECTOR_ETFS, Settings
 from ..data.storage import clear_computed_outputs, connect, log_quality, read_prices
 from ..scanners.pullback import pullback_hits
 from .indicators import atr, last_valid, pct_change_over, sma
@@ -26,6 +26,7 @@ def compute_all_metrics(settings: Settings) -> None:
     metric_rows = dimension_metric_rows(price_map, latest_date, equity_symbols)
     sector_rows = sector_return_rows(price_map, latest_date)
     scanner_rows = pullback_hits(price_map, latest_date, equity_symbols, symbol_meta)
+    log_scanner_quality(settings, price_map, equity_symbols, symbol_meta, scanner_rows)
     industry_rows = industry_return_rows(price_map, latest_date, equity_symbols, symbol_meta)
     clear_computed_outputs(settings.db_path)
     write_compute_outputs(settings, metric_rows, sector_rows, industry_rows, scanner_rows, latest_date)
@@ -371,6 +372,36 @@ def quality_examples(values: list[str], label: str, limit: int = 5) -> str:
     shown = ", ".join(values[:limit])
     more = "" if len(values) <= limit else f", +{len(values) - limit} more"
     return f"; {label}: {shown}{more}"
+
+
+def log_scanner_quality(
+    settings: Settings,
+    price_map: dict[str, pd.DataFrame],
+    equity_symbols: list[str],
+    symbol_meta: dict[str, tuple[str | None, str | None]],
+    scanner_rows: list[dict],
+) -> None:
+    excluded = [
+        symbol
+        for symbol in equity_symbols
+        if symbol_meta.get(symbol, (None, None))[1] in EXCLUDED_PULLBACK_SUB_INDUSTRIES
+    ]
+    with_history = [
+        symbol
+        for symbol in equity_symbols
+        if symbol not in excluded and len(price_map.get(symbol, pd.DataFrame())) >= 252
+    ]
+    missing_history = sorted(set(equity_symbols) - set(excluded) - set(with_history))
+    log_quality(
+        settings.db_path,
+        "scanner_coverage",
+        "ok" if not missing_history else "warning",
+        (
+            f"{len(with_history)} symbols scanned; {len(excluded)} excluded by industry; "
+            f"{len(scanner_rows)} research hits"
+            f"{quality_examples(missing_history, 'short_history')}"
+        ),
+    )
 
 
 def value_at_lookback(series: pd.Series, lookback: int) -> float | None:

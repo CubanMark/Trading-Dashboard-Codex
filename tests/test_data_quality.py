@@ -29,7 +29,7 @@ def test_quality_check_logs_invalid_ohlc_and_universe_examples():
         ]
     )
 
-    quality_check_prices(settings, prices, "test")
+    quality_check_prices(settings, prices, pd.DataFrame(), "test")
 
     with connect(db) as conn:
         rows = {
@@ -43,6 +43,47 @@ def test_quality_check_logs_invalid_ohlc_and_universe_examples():
     assert "MSFT" in rows["missing_symbols"]["message"]
     assert rows["universe_coverage"]["status"] == "warning"
     assert "2 active equities expected; 1 loaded" in rows["universe_coverage"]["message"]
+
+
+def test_quality_check_splits_extreme_returns_by_corporate_action():
+    tmp_dir = Path(".tmp_tests")
+    tmp_dir.mkdir(exist_ok=True)
+    db = tmp_dir / f"quality-{uuid4().hex}.sqlite3"
+    universe = tmp_dir / f"universe-{uuid4().hex}.csv"
+    universe.write_text(
+        "ticker,security,gics_sector,gics_sub_industry,index_membership,rows,last_close,median_dv_126d,passes\n"
+        "AAPL,Apple,Technology,Technology Hardware,S&P 500,300,100,100000000,True\n"
+        "MSFT,Microsoft,Technology,Software,S&P 500,300,100,100000000,True\n",
+        encoding="utf-8",
+    )
+    init_db(db)
+    settings = Settings(db_path=db, universe_csv_path=universe, years=1)
+    prices = pd.DataFrame(
+        [
+            price_row("AAPL", "2026-01-02", 100, 101, 99, 100),
+            price_row("AAPL", "2026-01-05", 45, 46, 44, 45),
+            price_row("MSFT", "2026-01-02", 100, 101, 99, 100),
+            price_row("MSFT", "2026-01-05", 40, 41, 39, 40),
+        ]
+    )
+    actions = pd.DataFrame(
+        [
+            {"symbol": "AAPL", "date": "2026-01-05", "action_type": "split", "value": 2.0},
+        ]
+    )
+
+    quality_check_prices(settings, prices, actions, "test")
+
+    with connect(db) as conn:
+        rows = {
+            row["check_name"]: dict(row)
+            for row in conn.execute("SELECT check_name, status, message FROM data_quality_checks")
+        }
+    assert rows["corporate_action_returns"]["status"] == "warning"
+    assert "AAPL" in rows["corporate_action_returns"]["message"]
+    assert rows["extreme_daily_returns"]["status"] == "warning"
+    assert "MSFT" in rows["extreme_daily_returns"]["message"]
+    assert "AAPL" not in rows["extreme_daily_returns"]["message"]
 
 
 def price_row(symbol: str, date: str, open_: float, high: float, low: float, close: float) -> dict:

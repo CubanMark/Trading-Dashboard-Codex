@@ -1,9 +1,11 @@
 from pathlib import Path
 from uuid import uuid4
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 
-from trading_dashboard.data.fetch import drop_current_session
+from trading_dashboard.data.fetch import drop_unfinished_session
 from trading_dashboard.data.storage import connect, init_db, replace_prices
 
 
@@ -47,8 +49,9 @@ def price_row(symbol: str, date: str, close: float, source: str) -> dict:
     }
 
 
-def test_drop_current_session_removes_unfinished_today_row():
-    today = pd.Timestamp.today().normalize()
+def test_drop_unfinished_session_removes_today_before_new_york_cutoff():
+    now = datetime(2026, 5, 14, 16, 0, tzinfo=ZoneInfo("America/New_York"))
+    today = pd.Timestamp("2026-05-14")
     yesterday = today - pd.Timedelta(days=1)
     frame = pd.DataFrame(
         [
@@ -57,6 +60,22 @@ def test_drop_current_session_removes_unfinished_today_row():
         ]
     )
 
-    filtered = drop_current_session(frame)
+    filtered = drop_unfinished_session(frame, now=now)
 
     assert filtered["date"].tolist() == [yesterday]
+
+
+def test_drop_unfinished_session_keeps_today_after_new_york_cutoff():
+    now = datetime(2026, 5, 14, 18, 0, tzinfo=ZoneInfo("America/New_York"))
+    today = pd.Timestamp("2026-05-14")
+    yesterday = today - pd.Timedelta(days=1)
+    frame = pd.DataFrame(
+        [
+            {"date": yesterday, "close": 100},
+            {"date": today, "close": 101},
+        ]
+    )
+
+    filtered = drop_unfinished_session(frame, now=now)
+
+    assert filtered["date"].tolist() == [yesterday, today]

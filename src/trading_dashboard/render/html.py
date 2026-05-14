@@ -41,8 +41,17 @@ def load_render_data(settings: Settings) -> dict:
             (latest_metric,),
         ).fetchall() if latest_metric else []
         runs = conn.execute("SELECT * FROM run_log ORDER BY id DESC LIMIT 8").fetchall()
-        quality = conn.execute("SELECT * FROM data_quality_checks ORDER BY id DESC LIMIT 8").fetchall()
+        quality = conn.execute("SELECT * FROM data_quality_checks ORDER BY id DESC LIMIT 12").fetchall()
         sources = conn.execute("SELECT source, COUNT(*) AS n, MAX(date) AS max_date FROM prices GROUP BY source ORDER BY source").fetchall()
+        active_equities = conn.execute("SELECT COUNT(*) AS n FROM symbols WHERE asset_class = 'equity' AND active = 1").fetchone()["n"]
+        priced_equities = conn.execute(
+            """
+            SELECT COUNT(DISTINCT p.symbol) AS n
+            FROM prices p
+            JOIN symbols s ON s.symbol = p.symbol
+            WHERE s.asset_class = 'equity' AND s.active = 1
+            """
+        ).fetchone()["n"]
         indexes = conn.execute(
             """
             SELECT p.symbol, p.date, p.close,
@@ -69,6 +78,7 @@ def load_render_data(settings: Settings) -> dict:
         "runs": [dict(row) for row in runs],
         "quality": [dict(row) for row in quality],
         "sources": [dict(row) for row in sources],
+        "operation": operation_summary([dict(row) for row in sources], [dict(row) for row in quality], active_equities, priced_equities),
         "indexes": [dict(row) for row in indexes],
     }
 
@@ -99,7 +109,7 @@ def render_index(data: dict) -> str:
           <strong>Market Dashboard</strong>
           <nav>{nav_links()}</nav>
           <span>Data: {esc(data["latest_date"])}</span>
-          <span>{esc(source_summary(data["sources"]))}</span>
+          <span>{esc(data["operation"])}</span>
         </header>
         {source_notice}
         <section class="index-strip">{index_cards}</section>
@@ -211,6 +221,7 @@ def page(title: str, body: str) -> str:
     .muted {{ color: var(--muted); }}
     .warning {{ color: #8a5a00; font-weight: 600; }}
     .source-notice {{ max-width: 1180px; margin: 18px auto 0; padding: 12px 18px; border: 1px solid #f0c36a; border-left: 5px solid #b58200; border-radius: 8px; background: #fff7e0; color: #583b00; font-weight: 700; }}
+    .status-note {{ margin: 0 0 12px; color: var(--muted); font-size: 14px; }}
     .scanner-toolbar {{ display: flex; align-items: center; gap: 10px; margin: 10px 0 12px; flex-wrap: wrap; }}
     .scanner-toolbar label {{ font-size: 13px; color: var(--muted); font-weight: 700; }}
     .scanner-toolbar select {{ border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--text); padding: 7px 10px; font-size: 14px; }}
@@ -434,6 +445,7 @@ def render_hits_table(hits: list[dict]) -> str:
             "</tr>"
         )
     return (
+        f"<p class='status-note'>{len(hits)} research hits displayed. Scanner coverage is tracked in Data Quality.</p>"
         "<div class='scanner-toolbar'>"
         "<label for='scanner-filter-setup'>Setup</label>"
         f"<select id='scanner-filter-setup' data-table-filter data-scanner-filter data-filter-key='scanner'>{setup_options}</select>"
@@ -524,6 +536,35 @@ def source_summary(sources: list[dict]) -> str:
         return "Price source: none"
     parts = [f"{row['source']} ({row['n']})" for row in sources]
     return "Price source: " + ", ".join(parts)
+
+
+def operation_summary(sources: list[dict], quality: list[dict], active_equities: int, priced_equities: int) -> str:
+    source_names = ", ".join(str(row["source"]) for row in sources) or "none"
+    max_date = max((str(row["max_date"]) for row in sources if row.get("max_date")), default="N/A")
+    checks = latest_checks_by_name(quality)
+    ohlc = checks.get("invalid_ohlc", {}).get("status", "na")
+    returns = checks.get("extreme_daily_returns", {})
+    corp = checks.get("corporate_action_returns", {})
+    return_warnings = warning_count_from_message(str(returns.get("message", "")))
+    corporate_warnings = warning_count_from_message(str(corp.get("message", "")))
+    return (
+        f"{source_names} | data {max_date} | equities {priced_equities}/{active_equities} | "
+        f"OHLC {ohlc} | returns {return_warnings} unexplained / {corporate_warnings} corporate-action"
+    )
+
+
+def latest_checks_by_name(quality: list[dict]) -> dict[str, dict]:
+    checks: dict[str, dict] = {}
+    for row in quality:
+        checks.setdefault(str(row["check_name"]), row)
+    return checks
+
+
+def warning_count_from_message(message: str) -> int:
+    for token in message.split():
+        if token.isdigit():
+            return int(token)
+    return 0
 
 
 def render_metric_delta(row: dict) -> str:
