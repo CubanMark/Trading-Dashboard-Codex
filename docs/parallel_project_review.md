@@ -150,17 +150,23 @@ Codex sollte Claudes explizite Volumen-/Preisfilter als Idee pruefen. Gleichzeit
 
 ## Rendering / UI
 
+Nachtraegliche Screenshot-Pruefung: Markus hat drei Screenshots bereitgestellt, zuerst Claude, danach zwei Codex-Ansichten. Dadurch ist der UI-Befund deutlicher als durch Code-Lesen allein.
+
 ### Codex staerker
 
 - Homepage ist funktionsreicher bei Scanner-Tabelle, Filtern, Sortierung und Statuskommunikation.
 - Zeigt positive/negative Sektoren, Industry Leadership Top/Bottom, Data Quality Log und Run Status.
 - Hat Detailseiten als Platzhalter-Struktur.
+- Scanner-Bereich ist operativ deutlich nuetzlicher: Varianten, gekoppelte Filter, Sortierung, Overlaps und mehr Kennzahlen.
+- Data-Quality-/Status-Transparenz ist im UI sichtbar und morgens entscheidungsrelevant.
 
 ### Claude staerker
 
 - Visuell kompakter und dashboard-artiger.
 - Nutzt Plotly-Sparklines und eine echte Sektor-Heatmap mit 1W/1M/3M/6M.
 - Breadth-Kachel ist fachlich reichhaltiger mit Sparkline, 200DMA, New Highs/Lows.
+- Erster Viewport ist deutlich staerker: Header, Index-Strip mit Sparklines, Market-State-Kacheln und Sektor-Heatmap wirken wie ein echtes Markt-Dashboard.
+- Die sechs Dimensionen sind visuell gleichwertiger und besser scannbar als Codex' grosser Market-State-Block.
 
 ### Warum verschieden
 
@@ -172,10 +178,13 @@ Codex sollte aus Claude uebernehmen:
 
 - Breadth-Kachel mit mehr echter Historie.
 - Sektor-Heatmap mit mehreren Zeitraeumen, aber Zeitraum-Toggle bleibt als bewusste Phase-1/2-Entscheidung zu pruefen.
+- Index-Strip mit Sparklines.
+- Sechs Market-State-Kacheln als gleichwertige Kachelreihe statt grossem gemischtem Block.
 
 Codex sollte behalten:
 
 - Statuszeile, Quality Log, Scanner-Filter und Research-Warnungen.
+- Scanner-Bereich und Data-Quality-Diagnostik. Zielbild: Claude oben, Codex unten.
 
 ## Tests / Verifikation
 
@@ -245,6 +254,7 @@ Codex sollte Pullback-Regeln und Swing-Lab-Bezug fachlich finaler dokumentieren,
 4. GitHub-Actions-DB-Cache und klarer EOD-Cron.
 5. Liquiditaetsfilter dokumentieren und ggf. scannerseitig nutzen.
 6. Sektor-Heatmap mit mehreren Zeitraeumen pruefen.
+7. UI-Zielbild "Claude oben, Codex unten": erster Viewport staerker visuell, Scanner/Diagnostik von Codex behalten.
 
 ## Bewusst nicht uebernehmen
 
@@ -269,6 +279,7 @@ Codex sollte Pullback-Regeln und Swing-Lab-Bezug fachlich finaler dokumentieren,
 - Codex Diagnose-UI vs. Claude visuelles Dashboard:
   - Codex macht Vertrauen und Ursachen sichtbar.
   - Claude liest sich eher wie ein Markt-Dashboard.
+  - Screenshot-Befund: Claude gewinnt die erste Bildschirmhaelfte, Codex gewinnt Scanner und Betriebsvertrauen.
   - Zielbild: Codex sollte Diagnostik behalten und visuelle Markt-Kacheln verbessern.
 
 ## Muss getrennt bleiben
@@ -289,6 +300,6 @@ Codex sollte Pullback-Regeln und Swing-Lab-Bezug fachlich finaler dokumentieren,
 
 ## Empfohlene naechste 3 Codex-Schritte
 
-1. Extreme Returns und yfinance-Teilfehler klaeren (`ANF`, `BAC`, `AAP`, `APLS`, `ASGN`, `CORT`, `HTZ`, ...).
-2. Breadth ausbauen: Historie plus `% > 200DMA`, New Highs/Lows, 52W-Naehe.
-3. yfinance-Update inkrementell und retry-faehig machen, mit bestehendem Data-Quality-Logging.
+1. UI-Zielbild "Claude oben, Codex unten" umsetzen: Index-Sparklines, gleichwertige Dimension-Kacheln, Sektor-Heatmap; Scanner/Diagnostics behalten.
+2. Extreme Returns und yfinance-Teilfehler klaeren (`ANF`, `BAC`, `AAP`, `APLS`, `ASGN`, `CORT`, `HTZ`, ...).
+3. Breadth ausbauen: Historie plus `% > 200DMA`, New Highs/Lows, 52W-Naehe.
