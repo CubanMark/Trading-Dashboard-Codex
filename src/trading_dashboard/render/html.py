@@ -135,7 +135,7 @@ def load_render_data(settings: Settings) -> dict:
     index_rows = [dict(row) for row in indexes]
     for row in index_rows:
         row["history"] = history_by_symbol.get(row["symbol"], [])
-    breadth_rows = [dict(row) for row in reversed(breadth)]
+    breadth_rows = annotate_breadth_regimes([dict(row) for row in reversed(breadth)])
     breadth_composite_chart = breadth_composite_chart_rows(breadth_rows, [dict(row) for row in spy_history])
     return {
         "latest_date": latest_metric or "No data",
@@ -193,10 +193,54 @@ def breadth_composite_chart_rows(breadth_rows: list[dict], spy_rows: list[dict])
             {
                 "date": row.get("date"),
                 "spy_close": close,
-                "composite": breadth_composite_score(row),
+                "composite": row.get("composite_score", breadth_composite_score(row)),
+                "regime": row.get("composite_regime", "Other"),
             }
         )
     return chart_rows
+
+
+def annotate_breadth_regimes(rows: list[dict]) -> list[dict]:
+    annotated: list[dict] = []
+    scores: list[int] = []
+    composite_5d_values: list[float] = []
+    negative_streak = 0
+    days_since_damaged: int | None = None
+    for row in rows:
+        copy = dict(row)
+        score = breadth_composite_score(copy)
+        scores.append(score)
+        composite_5d = sum(scores[-5:]) / len(scores[-5:])
+        composite_5d_values.append(composite_5d)
+        negative_streak = negative_streak + 1 if score < 0 else 0
+        is_damaged = composite_5d < 0 or negative_streak >= 3
+        if is_damaged:
+            days_since_damaged = 0
+        elif days_since_damaged is not None:
+            days_since_damaged += 1
+
+        five_day_change = None
+        if len(composite_5d_values) > 5:
+            five_day_change = composite_5d - composite_5d_values[-6]
+
+        if is_damaged:
+            regime = "Damaged"
+        elif days_since_damaged is not None and 1 <= days_since_damaged <= 10 and composite_5d > 0:
+            regime = "Healing"
+        elif composite_5d > 0 and five_day_change is not None and five_day_change <= -4:
+            regime = "Weakening"
+        elif composite_5d > 3:
+            regime = "Positive"
+        else:
+            regime = "Other"
+
+        copy["composite_score"] = score
+        copy["composite_5d"] = composite_5d
+        copy["composite_regime"] = regime
+        copy["negative_composite_streak"] = negative_streak
+        copy["days_since_damaged"] = days_since_damaged
+        annotated.append(copy)
+    return annotated
 
 
 def render_index(data: dict) -> str:
@@ -382,10 +426,18 @@ def page(title: str, body: str) -> str:
     .composite-head h2 {{ margin: 0; }}
     .composite-title {{ display: inline-flex; align-items: center; gap: 8px; }}
     .info-dot {{ display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 50%; border: 1px solid var(--line); color: var(--muted); font-size: 12px; font-weight: 800; cursor: help; }}
+    .composite-status {{ display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }}
     .composite-score {{ display: inline-grid; place-items: center; min-width: 76px; min-height: 58px; border: 1px solid var(--line); border-radius: 8px; background: #f8fafc; font-size: 30px; font-weight: 850; line-height: 1; box-shadow: inset 0 1px 0 rgba(255,255,255,.8); }}
     .composite-score.positive {{ color: #0f766e; border-color: #b9ddd4; background: #eefaf6; }}
     .composite-score.negative {{ color: #be4f5c; border-color: #efc5ca; background: #fff1f3; }}
     .composite-score.neutral {{ color: #334155; }}
+    .regime-pill {{ display: inline-flex; align-items: center; min-height: 28px; padding: 5px 10px; border-radius: 999px; border: 1px solid var(--line); background: #f8fafc; color: #334155; font-size: 12px; font-weight: 800; letter-spacing: .02em; text-transform: uppercase; }}
+    .regime-positive {{ color: #0f766e; background: #eefaf6; border-color: #b9ddd4; }}
+    .regime-healing {{ color: #0f766e; background: #e3f7f0; border-color: #87cdbb; }}
+    .regime-weakening {{ color: #9f5a00; background: #fff5e1; border-color: #e7c785; }}
+    .regime-damaged {{ color: #be4f5c; background: #fff1f3; border-color: #efc5ca; }}
+    .regime-other {{ color: #334155; background: #f8fafc; }}
+    .composite-readout {{ margin: -4px 0 0; color: var(--muted); font-size: 13px; line-height: 1.35; }}
     .composite-bar {{ position: relative; height: 18px; border-radius: 999px; background: linear-gradient(90deg, #e98b94 0%, #f7d9dd 25%, #f7f8fa 45%, #f7f8fa 55%, #d8f0e9 75%, #8fd6c3 100%); border: 1px solid var(--line); }}
     .composite-zero {{ position: absolute; left: 50%; top: -4px; bottom: -4px; width: 1px; background: rgba(24,32,42,.45); }}
     .composite-marker {{ position: absolute; top: -6px; width: 4px; height: 30px; border-radius: 999px; background: #18202a; transform: translateX(-50%); box-shadow: 0 0 0 3px rgba(255,255,255,.85); }}
@@ -741,7 +793,7 @@ def render_speculative_heat_cell(up_value: int | None, down_value: int | None) -
 
 
 def render_composite_heat_cell(row: dict) -> str:
-    score = breadth_composite_score(row)
+    score = int(row.get("composite_score", breadth_composite_score(row)))
     label = f"+{score}" if score > 0 else str(score)
     return render_heat_cell(label, composite_score_status(score))
 
@@ -938,16 +990,24 @@ def render_momentum_kpis(rows: list[dict]) -> str:
 
 
 def render_breadth_composite(row: dict) -> str:
-    score = breadth_composite_score(row)
+    score = int(row.get("composite_score", breadth_composite_score(row)))
     marker_left = (score + 18) / 36 * 100
     label = f"+{score}" if score > 0 else str(score)
     tone = "positive" if score > 0 else "negative" if score < 0 else "neutral"
+    regime = str(row.get("composite_regime") or "Other")
+    composite_5d = row.get("composite_5d")
+    regime_class = f"regime-{regime.lower()}" if regime in {"Positive", "Healing", "Weakening", "Damaged", "Other"} else "regime-other"
+    readout = composite_regime_readout(regime)
+    average_label = "N/A" if composite_5d is None else f"{float(composite_5d):+.1f}"
     return (
         "<section class='breadth-composite'>"
         "<div class='composite-head'><h2 class='composite-title'>Breadth Composite"
         "<span class='info-dot' title='Sum of the nine Breadth History color states: light +/-1, strong +/-2, neutral 0. 50% 1M is scored contrarian.'>i</span>"
         "</h2>"
-        f"<div class='composite-score {tone}'>{esc(label)}</div></div>"
+        "<div class='composite-status'>"
+        f"<span class='regime-pill {esc(regime_class)}' title='5D Composite: {esc(average_label)}'>{esc(regime)}</span>"
+        f"<div class='composite-score {tone}'>{esc(label)}</div></div></div>"
+        f"<p class='composite-readout'>{esc(readout)}</p>"
         "<div class='composite-bar' role='img' aria-label='Breadth Composite range from minus 18 to plus 18'>"
         "<div class='composite-zero'></div>"
         f"<div class='composite-marker' style='left:{marker_left:.1f}%'></div>"
@@ -955,6 +1015,16 @@ def render_breadth_composite(row: dict) -> str:
         "<div class='composite-scale'><span>-18</span><span>0</span><span>+18</span></div>"
         "</section>"
     )
+
+
+def composite_regime_readout(regime: str) -> str:
+    return {
+        "Healing": "Breadth repair after stress. Pullback setups deserve more attention, but still need price confirmation.",
+        "Damaged": "Market breadth is damaged. Treat new long exposure selectively unless SPY context confirms a tradable recovery.",
+        "Weakening": "Breadth is positive but deteriorating. Tighten selection and avoid chasing extended setups.",
+        "Positive": "Broad participation is supportive. Normal pullback process can stay active.",
+        "Other": "No clear Breadth regime edge. Read the component heatmap before changing exposure.",
+    }.get(regime, "No clear Breadth regime edge. Read the component heatmap before changing exposure.")
 
 
 def render_breadth_composite_chart(rows: list[dict]) -> str:
@@ -1518,46 +1588,63 @@ def format_metric_change(metric_id: str, change: float) -> str:
 def render_risk_detail(price_map: dict[str, list[dict]], metrics: list[dict]) -> str:
     xly = price_map.get("XLY", [])
     xlp = price_map.get("XLP", [])
-    risk_m = next((m for m in metrics if m.get("metric_id") == "risk_xly_xlp_trend"), None)
     if not xly or not xlp:
         return "<section><h2>XLY / XLP</h2><p>No price data available yet.</p></section>"
     xly_by_date = {r["date"]: r["close"] for r in xly}
     xlp_by_date = {r["date"]: r["close"] for r in xlp}
     common = sorted(set(xly_by_date) & set(xlp_by_date))
-    ratios = [xly_by_date[d] / xlp_by_date[d] for d in common if xlp_by_date[d] > 0]
-    if not ratios:
+    if len(common) < 2:
         return "<section><h2>XLY / XLP</h2><p>Insufficient data.</p></section>"
-    current_ratio = ratios[-1]
-    prior_ratio = ratios[-6] if len(ratios) >= 6 else None
-    ratio_change = current_ratio / prior_ratio - 1 if prior_ratio else None
-    ratio_status = "green" if ratio_change and ratio_change > 0 else ("red" if ratio_change and ratio_change < 0 else "yellow")
-    ratio_note = f"5D change {ratio_change:+.2%}" if ratio_change is not None else ""
-    ratio_spark = render_sparkline(ratios[-120:], "var(--sparkline)")
-    xly_spark = render_sparkline([r["close"] for r in xly[-120:]], "#2368a2")
-    xlp_spark = render_sparkline([r["close"] for r in xlp[-120:]], "#e88b3c")
-    metric_note = esc(str(risk_m.get("note", ""))) if risk_m else ""
-    metric_status = str(risk_m.get("status", "na")) if risk_m else "na"
+
+    def _ret(series_by_date: dict, dates: list, lookback: int) -> float | None:
+        if len(dates) <= lookback:
+            return None
+        cur = series_by_date.get(dates[-1])
+        ref = series_by_date.get(dates[-1 - lookback])
+        return (cur / ref - 1) if cur and ref else None
+
+    periods = [("1W", 5), ("1M", 21), ("3M", 63)]
+    perf_cards = ""
+    for label, lb in periods:
+        xly_r = _ret(xly_by_date, common, lb)
+        xlp_r = _ret(xlp_by_date, common, lb)
+        if xly_r is None or xlp_r is None:
+            continue
+        diff = xly_r - xlp_r
+        status = "green" if diff > 0.002 else ("red" if diff < -0.002 else "yellow")
+        signal = "RISK ON" if diff > 0.002 else ("RISK OFF" if diff < -0.002 else "NEUTRAL")
+        perf_cards += (
+            f"<article class='metric-card {status}'>"
+            f"<strong>{label} Performance</strong>"
+            f"<div class='big'>{diff:+.2%}</div>"
+            f"<div class='muted'>{signal}</div>"
+            f"<table style='width:100%;font-size:.85em;margin-top:.5em'>"
+            f"<tr><td>XLY</td><td style='text-align:right'>{xly_r:+.2%}</td></tr>"
+            f"<tr><td>XLP</td><td style='text-align:right'>{xlp_r:+.2%}</td></tr>"
+            f"</table>"
+            f"</article>"
+        )
+
+    ratios = [xly_by_date[d] / xlp_by_date[d] for d in common if xlp_by_date[d] > 0]
+    ratio_spark = render_sparkline(ratios[-126:], "var(--sparkline)")
+    xly_spark = render_sparkline([xly_by_date[d] for d in common[-126:]], "#2368a2")
+    xlp_spark = render_sparkline([xlp_by_date[d] for d in common[-126:]], "#e88b3c")
+
     return (
         "<p class='muted'>Consumer Discretionary (XLY) vs Consumer Staples (XLP) — "
-        "rising ratio = risk-on, falling = risk-off.</p>"
+        "XLY outperforming = Risk-On; XLP outperforming = Risk-Off. "
+        "Differential = XLY return minus XLP return over the period.</p>"
         "<section>"
-        "<h2>XLY / XLP Ratio</h2>"
-        f"<div class='cards' style='grid-template-columns:repeat(3,minmax(0,1fr));'>"
-        f"<article class='metric-card {ratio_status}'>"
-        f"<strong>XLY/XLP Ratio</strong>"
-        f"<div class='big'>{current_ratio:.3f}</div>"
-        f"<div class='muted'>{ratio_note}</div>"
-        f"{ratio_spark}</article>"
-        f"<article class='metric-card na'>"
-        f"<strong>XLY (Discretionary)</strong>"
-        f"<div class='big'>${xly[-1]['close']:.2f}</div>"
-        f"{xly_spark}</article>"
-        f"<article class='metric-card na'>"
-        f"<strong>XLP (Staples)</strong>"
-        f"<div class='big'>${xlp[-1]['close']:.2f}</div>"
-        f"{xlp_spark}</article>"
-        f"</div>"
-        f"<p class='muted'>{metric_note}</p>"
+        "<h2>Relative Performance</h2>"
+        f"<div class='cards' style='grid-template-columns:repeat(3,minmax(0,1fr));'>{perf_cards}</div>"
+        "</section>"
+        "<section>"
+        "<h2>Price Trend (6 months)</h2>"
+        "<div class='cards' style='grid-template-columns:repeat(3,minmax(0,1fr));'>"
+        f"<article class='metric-card na'><strong>XLY/XLP Ratio</strong>{ratio_spark}</article>"
+        f"<article class='metric-card na'><strong>XLY</strong>{xly_spark}</article>"
+        f"<article class='metric-card na'><strong>XLP</strong>{xlp_spark}</article>"
+        "</div>"
         "</section>"
     )
 
