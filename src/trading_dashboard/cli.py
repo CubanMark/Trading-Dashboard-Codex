@@ -19,7 +19,7 @@ def build_parser() -> argparse.ArgumentParser:
     for name in ["init-db", "fetch", "compute", "render", "update"]:
         cmd = sub.add_parser(name)
         cmd.add_argument("--mock", action="store_true", help="Use deterministic offline mock data")
-        cmd.add_argument("--years", type=int, default=1)
+        cmd.add_argument("--years", type=int, default=5)
 
     return parser
 

@@ -57,6 +57,32 @@ def test_mock_update_creates_db_and_html():
     assert "25% Up / Down 3M" in breadth_html
     assert "50% Up / Down 1M" in breadth_html
     assert "Daily momentum thrust" in breadth_html
+    assert "Breadth Composite" in breadth_html
+    assert "composite-bar" in breadth_html
+    assert "composite-score" in breadth_html
+    assert "SPY vs Breadth Composite" in breadth_html
+    assert "data-breadth-chart" in breadth_html
+    assert "SPY indexed to 100" in breadth_html
+    assert "Breadth Composite 5D avg" in breadth_html
+    assert "Composite below 0 for 3+ days" in breadth_html
+    assert "chart-negative-band" in breadth_html
+    assert "info-dot" in breadth_html
+    assert "data-breadth-history" in breadth_html
+    assert "data-breadth-year-select" in breadth_html
+    assert "data-breadth-year-count" in breadth_html
+    assert "class='breadth-heatmap'" in breadth_html
+    assert "Dashboard Breadth" in breadth_html
+    assert "Stockbee-style Momentum" in breadth_html
+    assert "group-composite" in breadth_html
+    assert "stockbee-head" in breadth_html
+    assert "Uncolored cells are normal range" in breadth_html
+    assert "50% 1M is colored contrarian" in breadth_html
+    assert "heat-light-red" in breadth_html
+    assert "heat-neutral" in breadth_html
+    assert "<th class='stockbee-head'>5D Ratio</th>" in breadth_html
+    assert "10D Ratio" in breadth_html
+    assert "50% 1M" in breadth_html
+    assert ">Composite</th>" in breadth_html
     assert "valid symbols" not in breadth_html
     assert "&gt; SMA200" in breadth_html
     with sqlite3.connect(db) as conn:
@@ -101,6 +127,7 @@ def test_scanner_filter_markup_is_rendered():
                 "perf_1w": 0.02,
                 "perf_1m": 0.05,
                 "ma_distance_pct": -0.01,
+                "ma_distance_atr": -0.42,
                 "atr_pct": 0.02,
                 "avg_volume_50d": 1_250_000,
                 "distance_to_52w_high": -0.03,
@@ -117,6 +144,7 @@ def test_scanner_filter_markup_is_rendered():
                 "perf_1w": -0.01,
                 "perf_1m": 0.03,
                 "ma_distance_pct": 0.01,
+                "ma_distance_atr": 0.35,
                 "atr_pct": 0.02,
                 "avg_volume_50d": 850_000,
                 "distance_to_52w_high": -0.04,
@@ -152,13 +180,72 @@ def test_scanner_filter_markup_is_rendered():
     assert "data-sort-key='industry'" in html
     assert "data-sort-key='perf_1w'" in html
     assert "data-sort-key='perf_1m'" in html
-    assert "data-sort-key='ma_distance'" in html
+    assert "data-sort-key='ma_distance_atr'" in html
     assert "data-sort-key='avg_volume'" in html
     assert "data-sort-cell='rs' data-sort-type='number' data-sort-value='90'" in html
     assert "data-sort-cell='industry' data-sort-type='text' data-sort-value='Technology Hardware'" in html
     assert "data-sort-cell='perf_1w' data-sort-type='number' data-sort-value='0.02'" in html
+    assert "data-sort-cell='ma_distance_atr' data-sort-type='number' data-sort-value='-0.42'" in html
     assert "data-sort-cell='avg_volume' data-sort-type='number' data-sort-value='1250000'" in html
     assert "1.2M" in html
+
+
+def test_breadth_history_renders_all_years_with_year_selector():
+    from trading_dashboard.render.html import render_breadth_history
+
+    rows = [
+        {"date": "2025-12-31", "pct_above_sma50": 20, "pct_above_sma200": 30},
+        {"date": "2026-01-02", "pct_above_sma50": 45, "pct_above_sma200": 50},
+        {"date": "2026-02-03", "pct_above_sma50": 65, "pct_above_sma200": 60},
+    ]
+
+    html = render_breadth_history(rows)
+
+    assert "data-breadth-year-select" in html
+    assert "<option value='2026' selected>2026</option>" in html
+    assert "<option value='2025'>2025</option>" in html
+    assert "data-year='2025'" in html
+    assert "12-31" in html
+    assert "01-02" in html
+    assert "02-03" in html
+
+
+def test_breadth_composite_scores_heatmap_states():
+    from trading_dashboard.render.html import breadth_composite_score
+
+    strong_positive = {
+        "pct_above_sma50": 70,
+        "pct_above_sma200": 70,
+        "new_highs_52w": 40,
+        "new_lows_52w": 10,
+        "pct_within_5pct_52w_high": 40,
+        "up_4pct": 40,
+        "down_4pct": 10,
+        "ratio_4pct_5d": 2.0,
+        "ratio_4pct_10d": 2.0,
+        "up_25pct_3m": 200,
+        "down_25pct_3m": 50,
+        "up_50pct_1m": 0,
+        "down_50pct_1m": 30,
+    }
+    strong_negative = {
+        "pct_above_sma50": 20,
+        "pct_above_sma200": 20,
+        "new_highs_52w": 10,
+        "new_lows_52w": 40,
+        "pct_within_5pct_52w_high": 5,
+        "up_4pct": 10,
+        "down_4pct": 40,
+        "ratio_4pct_5d": 0.3,
+        "ratio_4pct_10d": 0.3,
+        "up_25pct_3m": 50,
+        "down_25pct_3m": 200,
+        "up_50pct_1m": 30,
+        "down_50pct_1m": 0,
+    }
+
+    assert breadth_composite_score(strong_positive) == 18
+    assert breadth_composite_score(strong_negative) == -18
 
 
 def test_extreme_return_diagnostics_are_filterable_and_sortable():

@@ -121,6 +121,7 @@ CREATE TABLE IF NOT EXISTS scanner_hits (
     perf_1m REAL,
     atr_pct REAL,
     ma_distance_pct REAL,
+    ma_distance_atr REAL,
     avg_volume_50d REAL,
     distance_to_52w_high REAL,
     also_in TEXT,
@@ -177,6 +178,7 @@ def init_db(db_path: Path) -> None:
         ensure_column(conn, "scanner_hits", "scanner_label", "TEXT")
         ensure_column(conn, "scanner_hits", "perf_1w", "REAL")
         ensure_column(conn, "scanner_hits", "ma_distance_pct", "REAL")
+        ensure_column(conn, "scanner_hits", "ma_distance_atr", "REAL")
         ensure_column(conn, "scanner_hits", "also_in", "TEXT")
         ensure_column(conn, "scanner_hits", "trigger_note", "TEXT")
         ensure_column(conn, "breadth_daily", "pct_above_sma200", "REAL")

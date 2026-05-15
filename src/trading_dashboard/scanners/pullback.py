@@ -11,6 +11,7 @@ MIN_LATEST_CLOSE = 10.0
 MIN_AVG_VOLUME_50D = 750_000
 MIN_RS_RANK = 70.0
 MAX_DISTANCE_TO_52W_HIGH = -0.30
+MAX_MA_DISTANCE_ATR = 0.75
 
 
 def pullback_hits(
@@ -18,6 +19,7 @@ def pullback_hits(
     latest_date: str,
     equity_symbols: list[str],
     metadata: dict[str, tuple[str | None, str | None]] | None = None,
+    excluded_symbols: set[str] | None = None,
 ) -> list[dict]:
     spy_ok = spy_market_regime(price_map)
     rows_by_scanner: dict[str, list[dict]] = {
@@ -32,8 +34,11 @@ def pullback_hits(
         if len(frame) >= 22:
             perf_map[symbol] = float(frame["close"].iloc[-1] / frame["close"].iloc[-22] - 1)
     ranks = percentile_rank(pd.Series(perf_map)) if perf_map else pd.Series(dtype=float)
+    blocked = excluded_symbols or set()
 
     for symbol in equity_symbols:
+        if symbol in blocked:
+            continue
         sector, industry = symbol_meta.get(symbol, SYMBOL_SECTORS.get(symbol, (None, None)))
         if industry in EXCLUDED_PULLBACK_SUB_INDUSTRIES:
             continue
@@ -136,16 +141,17 @@ def passes_relative_strength(rs_rank: float | None) -> bool:
     return bool(rs_rank is not None and pd.notna(rs_rank) and float(rs_rank) >= MIN_RS_RANK)
 
 
-def near_moving_average(frame: pd.DataFrame, window: int, max_distance_pct: float = 0.02) -> bool:
+def near_moving_average(frame: pd.DataFrame, window: int, max_distance_atr: float = MAX_MA_DISTANCE_ATR) -> bool:
     if len(frame) < window:
         return False
     close = frame["close"]
     average = sma(close, window)
-    if pd.isna(average.iloc[-1]) or average.iloc[-1] == 0:
+    atr14 = atr(frame, 14)
+    if pd.isna(average.iloc[-1]) or pd.isna(atr14.iloc[-1]) or atr14.iloc[-1] <= 0:
         return False
-    distance = abs(float(close.iloc[-1] / average.iloc[-1] - 1))
+    distance = abs(float((close.iloc[-1] - average.iloc[-1]) / atr14.iloc[-1]))
     recently_pulled_back = close.iloc[-1] < close.tail(10).max()
-    return bool(distance <= max_distance_pct and recently_pulled_back)
+    return bool(distance <= max_distance_atr and recently_pulled_back)
 
 
 def ma_distance_pct(frame: pd.DataFrame, window: int | None) -> float | None:
@@ -155,6 +161,16 @@ def ma_distance_pct(frame: pd.DataFrame, window: int | None) -> float | None:
     if pd.isna(average.iloc[-1]) or average.iloc[-1] == 0:
         return None
     return float(frame["close"].iloc[-1] / average.iloc[-1] - 1)
+
+
+def ma_distance_atr(frame: pd.DataFrame, window: int | None) -> float | None:
+    if window is None or len(frame) < window:
+        return None
+    average = sma(frame["close"], window)
+    atr14 = atr(frame, 14)
+    if pd.isna(average.iloc[-1]) or pd.isna(atr14.iloc[-1]) or atr14.iloc[-1] <= 0:
+        return None
+    return float((frame["close"].iloc[-1] - average.iloc[-1]) / atr14.iloc[-1])
 
 
 def hit_row(
@@ -189,6 +205,7 @@ def hit_row(
         "perf_1m": perf_1m,
         "atr_pct": atr_pct,
         "ma_distance_pct": ma_distance_pct(frame, ma_window),
+        "ma_distance_atr": ma_distance_atr(frame, ma_window),
         "avg_volume_50d": avg_volume,
         "distance_to_52w_high": distance,
         "also_in": "",

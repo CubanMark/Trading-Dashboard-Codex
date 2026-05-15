@@ -3,9 +3,11 @@ import pandas as pd
 from trading_dashboard.scanners.pullback import (
     annotate_overlaps,
     is_pullback_candidate,
+    ma_distance_atr,
     matching_pullback_variants,
     near_moving_average,
     passes_relative_strength,
+    pullback_hits,
 )
 
 
@@ -31,6 +33,17 @@ def test_near_moving_average_rejects_far_pullback():
     frame = make_trending_frame()
     frame.loc[frame.index[-1], "close"] = frame["close"].iloc[-1] * 0.8
     assert not near_moving_average(frame, 10)
+
+
+def test_near_moving_average_uses_atr_normalized_distance():
+    frame = make_trending_frame()
+    average = frame["close"].tail(10).mean()
+    frame.loc[frame.index[-1], "close"] = average + 0.60 * 2.0
+    frame.loc[frame.index[-1], "high"] = frame.loc[frame.index[-1], "close"] + 1
+    frame.loc[frame.index[-1], "low"] = frame.loc[frame.index[-1], "close"] - 1
+
+    assert near_moving_average(frame, 10)
+    assert ma_distance_atr(frame, 10) is not None
 
 
 def test_variants_require_liquid_priceable_stock():
@@ -63,10 +76,19 @@ def test_annotate_overlaps_lists_other_scanners_for_same_symbol():
     assert annotated[2]["also_in"] == ""
 
 
+def test_pullback_hits_excludes_flagged_symbols():
+    frame = make_trending_frame()
+    price_map = {"SPY": frame, "AAPL": frame}
+
+    rows = pullback_hits(price_map, "2024-12-27", ["AAPL"], {"AAPL": ("Technology", "Software")}, {"AAPL"})
+
+    assert rows == []
+
+
 def make_trending_frame() -> pd.DataFrame:
     dates = pd.bdate_range("2024-01-01", periods=260)
     close = pd.Series(range(100, 360), dtype=float)
-    close.iloc[-4:] = [360, 358, 356, 354]
+    close.iloc[-20:] = [348] * 16 + [350, 349, 348, 347]
     return pd.DataFrame(
         {
             "symbol": "AAPL",

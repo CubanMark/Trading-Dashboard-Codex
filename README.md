@@ -23,7 +23,7 @@ python -m venv .venv
 
 Danach `pages/index.html` im Browser oeffnen.
 
-Der Standardlauf nutzt ein 1-Jahres-Fenster. Das reicht fuer SMA50, SMA200, ATR und den Research-Scanner und haelt den yfinance-Build fuer das grosse Universum handhabbar.
+Der Standardlauf nutzt ein 5-Jahres-Fenster. Das gibt Breadth, 52W-High/Low und Composite-Auswertungen genug Warmup fuer eine brauchbarere Regime-Historie.
 
 ## CLI
 
@@ -33,7 +33,7 @@ python -m trading_dashboard fetch --mock
 python -m trading_dashboard compute
 python -m trading_dashboard render
 python -m trading_dashboard update --mock
-python -m trading_dashboard update --years 1
+python -m trading_dashboard update --years 5
 ```
 
 Ohne `--mock` nutzt die Pipeline yfinance, falls das Paket installiert ist und Netzwerk verfuegbar ist.

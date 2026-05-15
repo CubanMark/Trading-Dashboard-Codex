@@ -27,8 +27,15 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install -e .
+      - name: Restore dashboard database cache
+        uses: actions/cache@v4
+        with:
+          path: db/
+          key: trading-dashboard-db-${{ github.run_number }}
+          restore-keys: |
+            trading-dashboard-db-
       - name: Build dashboard
-        run: python -m trading_dashboard update
+        run: python -m trading_dashboard update --years 5
       - name: Configure Pages
         uses: actions/configure-pages@v5
       - name: Upload artifact

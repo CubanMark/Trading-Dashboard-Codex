@@ -75,7 +75,7 @@ class Settings:
     db_path: Path = DB_PATH
     pages_dir: Path = PAGES_DIR
     universe_csv_path: Path = UNIVERSE_CSV_PATH
-    years: int = 1
+    years: int = 5
 
     @property
     def equity_symbols(self) -> list[str]:

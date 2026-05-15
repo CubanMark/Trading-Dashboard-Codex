@@ -23,10 +23,11 @@ def compute_all_metrics(settings: Settings) -> None:
     price_map = price_frames_by_symbol(prices)
     symbol_meta = load_symbol_metadata(settings)
     log_compute_quality(settings, price_map, equity_symbols, symbol_meta)
+    excluded_scanner_symbols = load_scanner_excluded_symbols(settings)
     breadth_rows = breadth_history_rows(price_map, equity_symbols)
     metric_rows = dimension_metric_rows(price_map, latest_date, equity_symbols, breadth_rows)
     sector_rows = sector_return_rows(price_map, latest_date)
-    scanner_rows = pullback_hits(price_map, latest_date, equity_symbols, symbol_meta)
+    scanner_rows = pullback_hits(price_map, latest_date, equity_symbols, symbol_meta, excluded_scanner_symbols)
     log_scanner_quality(settings, price_map, equity_symbols, symbol_meta, scanner_rows)
     industry_rows = industry_return_rows(price_map, latest_date, equity_symbols, symbol_meta)
     clear_computed_outputs(settings.db_path)
@@ -454,11 +455,11 @@ def write_compute_outputs(
                 """
                 INSERT INTO scanner_hits (
                     scanner_id, date, symbol, scanner_label, sector, industry, rs_rank, perf_1w, perf_1m, atr_pct,
-                    ma_distance_pct, avg_volume_50d, distance_to_52w_high, also_in, trigger_note, warning
+                    ma_distance_pct, ma_distance_atr, avg_volume_50d, distance_to_52w_high, also_in, trigger_note, warning
                 )
                 VALUES (
                     :scanner_id, :date, :symbol, :scanner_label, :sector, :industry, :rs_rank, :perf_1w, :perf_1m,
-                    :atr_pct, :ma_distance_pct, :avg_volume_50d, :distance_to_52w_high, :also_in, :trigger_note, :warning
+                    :atr_pct, :ma_distance_pct, :ma_distance_atr, :avg_volume_50d, :distance_to_52w_high, :also_in, :trigger_note, :warning
                 )
                 """,
                 scanner_rows,
@@ -470,6 +471,18 @@ def load_symbol_metadata(settings: Settings) -> dict[str, tuple[str | None, str 
     with connect(settings.db_path) as conn:
         rows = conn.execute("SELECT symbol, sector, industry FROM symbols WHERE asset_class = 'equity' AND active = 1").fetchall()
     return {row["symbol"]: (row["sector"], row["industry"]) for row in rows}
+
+
+def load_scanner_excluded_symbols(settings: Settings) -> set[str]:
+    with connect(settings.db_path) as conn:
+        rows = conn.execute(
+            """
+            SELECT DISTINCT symbol
+            FROM extreme_return_events
+            WHERE label IN ('missing_corporate_action', 'possible_data_error')
+            """
+        ).fetchall()
+    return {row["symbol"] for row in rows}
 
 
 def log_compute_quality(

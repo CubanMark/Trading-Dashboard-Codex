@@ -42,8 +42,8 @@ Diese Filter sind bewusst konservativ, aber noch nicht als finaler Edge-Filter z
 Die Varianten bleiben sichtbar, weil Ueberschneidungen nuetzlich sind:
 
 - `3D Pullback`: drei tiefere Schlusskurse in Folge innerhalb des Basisfilters
-- `Pullback MA10`: Schlusskurs maximal 2% von SMA10 entfernt und in den letzten 10 Tagen unter dem lokalen Hoch
-- `Pullback MA20`: Schlusskurs maximal 2% von SMA20 entfernt und in den letzten 10 Tagen unter dem lokalen Hoch
+- `Pullback MA10`: Schlusskurs maximal 0.75 ATR14 von SMA10 entfernt und in den letzten 10 Tagen unter dem lokalen Hoch
+- `Pullback MA20`: Schlusskurs maximal 0.75 ATR14 von SMA20 entfernt und in den letzten 10 Tagen unter dem lokalen Hoch
 
 `Pullback MA20` ist die fachlich konservativste Variante. `MA10` und `3D Pullback` bleiben Research-Kontext, nicht separate Handelsfreigaben.
 
@@ -56,6 +56,7 @@ Die Scanner-Tabelle zeigt:
 - 1W- und 1M-Performance
 - MA-Distanz
 - ATR%
+- Distanz zum passenden MA in ATR-Einheiten
 - durchschnittliches 50-Tage-Volumen
 - Distanz zum 52W-Hoch
 - Ueberschneidungen mit anderen Varianten
