@@ -144,6 +144,19 @@ CREATE TABLE IF NOT EXISTS data_quality_checks (
     status TEXT NOT NULL,
     message TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS extreme_return_events (
+    symbol TEXT NOT NULL,
+    date TEXT NOT NULL,
+    daily_return REAL,
+    previous_close REAL,
+    close REAL,
+    next_close REAL,
+    label TEXT NOT NULL,
+    note TEXT NOT NULL,
+    source TEXT NOT NULL,
+    PRIMARY KEY (symbol, date)
+);
 """
 
 
@@ -184,6 +197,13 @@ def init_db(db_path: Path) -> None:
         ensure_column(conn, "breadth_daily", "down_50pct_1m", "INTEGER")
         ensure_column(conn, "breadth_daily", "valid_momentum", "INTEGER NOT NULL DEFAULT 0")
         ensure_column(conn, "breadth_daily", "status", "TEXT NOT NULL DEFAULT 'ok'")
+        ensure_column(conn, "extreme_return_events", "daily_return", "REAL")
+        ensure_column(conn, "extreme_return_events", "previous_close", "REAL")
+        ensure_column(conn, "extreme_return_events", "close", "REAL")
+        ensure_column(conn, "extreme_return_events", "next_close", "REAL")
+        ensure_column(conn, "extreme_return_events", "label", "TEXT NOT NULL DEFAULT 'unknown'")
+        ensure_column(conn, "extreme_return_events", "note", "TEXT NOT NULL DEFAULT ''")
+        ensure_column(conn, "extreme_return_events", "source", "TEXT NOT NULL DEFAULT 'unknown'")
 
 
 def ensure_column(conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:
@@ -210,6 +230,23 @@ def log_quality(db_path: Path, check_name: str, status: str, message: str) -> No
             "INSERT INTO data_quality_checks (checked_at, check_name, status, message) VALUES (?, ?, ?, ?)",
             (now_utc(), check_name, status, message),
         )
+
+
+def replace_extreme_return_events(db_path: Path, rows: list[dict]) -> None:
+    with connect(db_path) as conn:
+        conn.execute("DELETE FROM extreme_return_events")
+        if rows:
+            conn.executemany(
+                """
+                INSERT INTO extreme_return_events (
+                    symbol, date, daily_return, previous_close, close, next_close, label, note, source
+                )
+                VALUES (
+                    :symbol, :date, :daily_return, :previous_close, :close, :next_close, :label, :note, :source
+                )
+                """,
+                rows,
+            )
 
 
 def upsert_symbols(db_path: Path, rows: Iterable[dict]) -> None:

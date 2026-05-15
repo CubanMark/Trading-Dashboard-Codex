@@ -1,6 +1,6 @@
 # Session Handoff - Trading Dashboard
 
-Stand: 2026-05-14, Update nach Momentum-Breadth-Erweiterung
+Stand: 2026-05-15, Update nach Extreme-Return-Diagnostik
 Phase: 1 MVP
 Baseline-Commit: `e9e41bb Create phase 1 MVP baseline`
 
@@ -21,6 +21,7 @@ Das Projekt hat eine funktionierende Phase-1-MVP-Basis:
 - GitHub-Actions-Workflow fuer Pages-Build
 - Tests fuer Indikatoren, Storage, Universe-Loader, Pullback-Scanner, Fetch-Replacement und Mock-Integration
 - persistierte Breadth-Historie in `breadth_daily` mit SMA50/SMA200, 52W Highs/Lows, Coverage und Momentum-Breadth-Zaehlungen
+- persistierte Extreme-Return-Diagnostik in `extreme_return_events`
 
 Letzte bekannte Verifikation:
 
@@ -70,6 +71,8 @@ Neu gehaertet:
 - EOD-Cutoff nutzt New-York-Zeit: vor 17:30 ET wird der aktuelle Tagesbalken entfernt, nach 17:30 ET bleibt er erlaubt.
 - Dashboard-Topbar zeigt eine kompakte Betriebszeile: Quelle, letztes Daten-Datum, Equity-Coverage, OHLC-Status und Return-Warnungen.
 - Extreme Tagesrenditen werden getrennt geloggt als `corporate_action_returns` und `extreme_daily_returns`.
+- Extreme Tagesrenditen werden zusaetzlich in `extreme_return_events` gespeichert und auf der Homepage unter `Extreme Return Diagnostics` angezeigt: Symbol, Datum, Return, vorheriger Schlusskurs, Schlusskurs, naechster Schlusskurs, Label und Diagnosehinweis.
+- Aktueller yfinance-Lauf vom 2026-05-15: Datenstand 2026-05-14, 1244/1244 Equities, 0 Missing Symbols nach Retry, 14 extreme Returns; davon 4 `missing_corporate_action`, 10 `likely_real_move`, 0 `possible_data_error`.
 - Scanner-Coverage wird geloggt: letzter echter Lauf 1150 Symbole gescannt, 93 per Industry ausgeschlossen, 75 Research Hits.
 - Breadth-Historie wird bei `compute` aus den gespeicherten Kursen neu aufgebaut und bei `render` auf `/breadth.html` als Tabelle der letzten 30 Handelstage angezeigt. Die Homepage nutzt dieselbe Historie fuer die Breadth-Sparkline.
 - `/breadth.html` trennt jetzt `Participation Breadth` und `Momentum Breadth`. Participation zeigt SMA50, SMA200, 52W Highs/Lows und Near-52W-High ohne redundanten `valid symbols`-Text in jeder KPI-Karte. Momentum zeigt die wichtigsten Market-Monitor-inspirierten Werte: 4% Up/Down taeglich, 5D- und 10D-Ratio daraus, 25% Up/Down ueber 3M sowie 50% Up/Down ueber 1M. Die Historientabelle enthaelt dieselben neuen Spalten.
@@ -128,8 +131,8 @@ Zielbild ist nicht ein kleines Testuniversum, sondern die 1.500 liquidesten Akti
 
 Hohe Prioritaet:
 
-- yfinance-Teilfehler treten tatsaechlich auf: letzter Lauf meldete `ANF` und `BAC` fehlend; Coverage zeigt deshalb 1242/1244.
-- Extreme Tagesrenditen bleiben fachlich zu klaeren. Letzter yfinance-Lauf: 13 unexplained, 0 corporate-action-related (`AAP`, `APLS`, `ASGN`, `CORT`, `HTZ`, ...).
+- yfinance-Teilfehler treten tatsaechlich auf. Letzter Lauf meldete `NPO` im Batch als fehlend, der Retry/Endstatus zeigte danach aber 1244/1244 geladene Equities und `missing_symbols - ok`.
+- Extreme Tagesrenditen bleiben fachlich zu klaeren. Letzter yfinance-Lauf: 14 unexplained, 0 corporate-action-related; Diagnose-Tabelle nennt u.a. `AAP`, `APLS`, `ASGN`, `CORT`, `HTZ`, `PRIM`.
 
 Mittlere Prioritaet:
 
@@ -139,9 +142,9 @@ Mittlere Prioritaet:
 
 ## Empfohlene naechste Schritte
 
-1. Extreme Tagesrenditen einordnen:
-   - Beispiele aus `extreme_daily_returns` gegen Corporate Actions/Splits pruefen
-   - pruefen, ob yfinance Corporate Actions fuer diese Faelle fehlen oder ob die Rohdaten selbst fehlerhaft sind
+1. Extreme Tagesrenditen fachlich entscheiden:
+   - `missing_corporate_action`-Faelle aus `extreme_return_events` gegen Splits/Corporate Actions pruefen
+   - entscheiden, ob man manuelle Corporate-Action-Overrides pflegt oder zunaechst nur sichtbar warnt
    - keine Adjusted-Werte heimlich einmischen; Phase-1-Entscheidung bleibt unadjusted + Corporate Actions separat
 
 2. yfinance-Fehlermeldungen behandeln:

@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 
 from ..config import INDEX_SYMBOLS, SECTOR_ETFS, SYMBOL_SECTORS, Settings
-from .storage import log_quality, log_run, replace_actions, replace_prices, upsert_symbols
+from .storage import log_quality, log_run, replace_actions, replace_extreme_return_events, replace_prices, upsert_symbols
 from .universe import load_equity_universe
 
 COMMON_SPLIT_RATIOS = (2.0, 3.0, 4.0, 5.0, 10.0)
@@ -266,6 +266,7 @@ def quality_check_prices(settings: Settings, prices: pd.DataFrame, actions: pd.D
     ].copy()
     action_related, unexplained = classify_extreme_returns(extreme_rows, actions)
     diagnostics = diagnose_extreme_returns(extreme_rows, actions)
+    replace_extreme_return_events(settings.db_path, extreme_return_event_rows(diagnostics, source))
     log_quality(
         settings.db_path,
         "corporate_action_returns",
@@ -343,16 +344,50 @@ def diagnose_extreme_return(record: dict, action_keys: set[tuple[str, str]]) -> 
     action_window = action_dates_around(date_value)
     if any((symbol, day) in action_keys for day in action_window):
         label = "corporate_action"
+        note = "Corporate action found within +/- 1 day"
     elif is_split_like_move(record):
         label = "missing_corporate_action"
+        note = "Close/previous close ratio resembles a common split ratio, but no action was fetched"
     elif is_one_day_reversal(record):
         label = "possible_data_error"
+        note = "Extreme move reverses near the prior close on the next bar"
     else:
         label = "likely_real_move"
+        note = "No split-like ratio or one-day reversal pattern detected"
     return {
+        "symbol": symbol,
+        "date": pd.Timestamp(date_value).strftime("%Y-%m-%d"),
+        "daily_return": nullable_float(record.get("daily_return")),
+        "previous_close": nullable_float(record.get("previous_close")),
+        "close": nullable_float(record.get("close")),
+        "next_close": nullable_float(record.get("next_close")),
         "label": label,
+        "note": note,
         "example": extreme_return_label(record),
     }
+
+
+def extreme_return_event_rows(diagnostics: list[dict], source: str) -> list[dict]:
+    return [
+        {
+            "symbol": item["symbol"],
+            "date": item["date"],
+            "daily_return": item["daily_return"],
+            "previous_close": item["previous_close"],
+            "close": item["close"],
+            "next_close": item["next_close"],
+            "label": item["label"],
+            "note": item["note"],
+            "source": source,
+        }
+        for item in diagnostics
+    ]
+
+
+def nullable_float(value: object) -> float | None:
+    if value is None or pd.isna(value):
+        return None
+    return float(value)
 
 
 def extreme_return_diagnostics_message(diagnostics: list[dict]) -> str:

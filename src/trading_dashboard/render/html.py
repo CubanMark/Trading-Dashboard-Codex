@@ -44,6 +44,9 @@ def load_render_data(settings: Settings) -> dict:
         ).fetchall() if latest_metric else []
         runs = conn.execute("SELECT * FROM run_log ORDER BY id DESC LIMIT 8").fetchall()
         quality = conn.execute("SELECT * FROM data_quality_checks ORDER BY id DESC LIMIT 12").fetchall()
+        extreme_returns = conn.execute(
+            "SELECT * FROM extreme_return_events ORDER BY ABS(COALESCE(daily_return, 0)) DESC, symbol LIMIT 20"
+        ).fetchall()
         sources = conn.execute("SELECT source, COUNT(*) AS n, MAX(date) AS max_date FROM prices GROUP BY source ORDER BY source").fetchall()
         breadth = conn.execute("SELECT * FROM breadth_daily ORDER BY date DESC LIMIT 90").fetchall()
         active_equities = conn.execute("SELECT COUNT(*) AS n FROM symbols WHERE asset_class = 'equity' AND active = 1").fetchone()["n"]
@@ -102,6 +105,7 @@ def load_render_data(settings: Settings) -> dict:
         "hits": [dict(row) for row in hits],
         "runs": [dict(row) for row in runs],
         "quality": [dict(row) for row in quality],
+        "extreme_returns": [dict(row) for row in extreme_returns],
         "sources": [dict(row) for row in sources],
         "operation": operation_summary([dict(row) for row in sources], [dict(row) for row in quality], active_equities, priced_equities),
         "indexes": sort_index_rows(index_rows),
@@ -286,6 +290,8 @@ def page(title: str, body: str) -> str:
     .tag-3d {{ color: #7c2d12; background: #ffedd5; border: 1px solid #fed7aa; }}
     .tag-neutral {{ color: #475569; background: #f1f5f9; border: 1px solid #e2e8f0; }}
     .loggrid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }}
+    .quality-detail {{ margin-top: 16px; }}
+    .quality-label {{ display: inline-block; padding: 2px 6px; border-radius: 4px; background: #eef2f7; color: #334155; font-size: 12px; font-weight: 700; }}
     @media (max-width: 1100px) {{
       .metric-grid, .cards {{ grid-template-columns: repeat(3, minmax(0, 1fr)); }}
     }}
@@ -811,7 +817,35 @@ def render_scanner_tag(label: str, tooltip: str = "") -> str:
 def render_logs(data: dict) -> str:
     run_items = "".join(f"<li>{esc(row['run_at'])}: {esc(row['step'])} - {esc(row['status'])}</li>" for row in data["runs"])
     quality_items = "".join(f"<li>{esc(row['checked_at'])}: {esc(row['check_name'])} - {esc(row['status'])}: {esc(row['message'])}</li>" for row in data["quality"])
-    return f"<div class='loggrid'><section><h2>Runs</h2><ul>{run_items}</ul></section><section><h2>Data Quality</h2><ul>{quality_items}</ul></section></div>"
+    return (
+        f"<div class='loggrid'><section><h2>Runs</h2><ul>{run_items}</ul></section>"
+        f"<section><h2>Data Quality</h2><ul>{quality_items}</ul></section></div>"
+        f"{render_extreme_return_events(data.get('extreme_returns', []))}"
+    )
+
+
+def render_extreme_return_events(rows: list[dict]) -> str:
+    if not rows:
+        return ""
+    body = "".join(
+        "<tr>"
+        f"<td>{esc(row['symbol'])}</td>"
+        f"<td>{esc(row['date'])}</td>"
+        f"<td>{fmt(row.get('daily_return'), '{:.1%}')}</td>"
+        f"<td>{fmt(row.get('previous_close'), '{:.2f}')}</td>"
+        f"<td>{fmt(row.get('close'), '{:.2f}')}</td>"
+        f"<td>{fmt(row.get('next_close'), '{:.2f}')}</td>"
+        f"<td><span class='quality-label'>{esc(row['label'])}</span></td>"
+        f"<td>{esc(row['note'])}</td>"
+        "</tr>"
+        for row in rows
+    )
+    return (
+        "<section class='quality-detail'><h2>Extreme Return Diagnostics</h2>"
+        "<table class='compact-table'><thead><tr><th>Symbol</th><th>Date</th><th>Return</th>"
+        "<th>Prev Close</th><th>Close</th><th>Next Close</th><th>Label</th><th>Note</th></tr></thead>"
+        f"<tbody>{body}</tbody></table></section>"
+    )
 
 
 def render_source_notice(sources: list[dict]) -> str:

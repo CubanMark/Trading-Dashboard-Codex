@@ -79,6 +79,7 @@ def test_quality_check_splits_extreme_returns_by_corporate_action():
             row["check_name"]: dict(row)
             for row in conn.execute("SELECT check_name, status, message FROM data_quality_checks")
         }
+        events = [dict(row) for row in conn.execute("SELECT symbol, label, note FROM extreme_return_events ORDER BY symbol")]
     assert rows["corporate_action_returns"]["status"] == "warning"
     assert "AAPL" in rows["corporate_action_returns"]["message"]
     assert rows["extreme_daily_returns"]["status"] == "warning"
@@ -87,6 +88,14 @@ def test_quality_check_splits_extreme_returns_by_corporate_action():
     assert rows["extreme_return_diagnostics"]["status"] == "warning"
     assert "corporate_action=1" in rows["extreme_return_diagnostics"]["message"]
     assert "likely_real_move=1" in rows["extreme_return_diagnostics"]["message"]
+    assert events == [
+        {"symbol": "AAPL", "label": "corporate_action", "note": "Corporate action found within +/- 1 day"},
+        {
+            "symbol": "MSFT",
+            "label": "likely_real_move",
+            "note": "No split-like ratio or one-day reversal pattern detected",
+        },
+    ]
 
 
 def test_quality_check_diagnoses_split_like_and_reversal_extremes():
@@ -120,10 +129,21 @@ def test_quality_check_diagnoses_split_like_and_reversal_extremes():
             row["check_name"]: dict(row)
             for row in conn.execute("SELECT check_name, status, message FROM data_quality_checks")
         }
+        events = {
+            (row["symbol"], row["date"]): dict(row)
+            for row in conn.execute(
+                "SELECT symbol, date, label, previous_close, close, next_close FROM extreme_return_events ORDER BY symbol, date"
+            )
+        }
     assert rows["extreme_return_diagnostics"]["status"] == "warning"
     assert "missing_corporate_action=1" in rows["extreme_return_diagnostics"]["message"]
     assert "possible_data_error=1" in rows["extreme_return_diagnostics"]["message"]
     assert "AAPL 2026-01-05 -51.0%" in rows["extreme_return_diagnostics"]["message"]
+    assert events[("AAPL", "2026-01-05")]["label"] == "missing_corporate_action"
+    assert events[("AAPL", "2026-01-05")]["previous_close"] == 100
+    assert events[("AAPL", "2026-01-05")]["close"] == 49
+    assert events[("MSFT", "2026-01-05")]["label"] == "possible_data_error"
+    assert events[("MSFT", "2026-01-05")]["next_close"] == 102
 
 
 def price_row(symbol: str, date: str, open_: float, high: float, low: float, close: float) -> dict:
