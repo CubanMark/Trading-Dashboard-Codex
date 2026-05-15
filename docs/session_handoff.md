@@ -1,6 +1,6 @@
 # Session Handoff - Trading Dashboard
 
-Stand: 2026-05-14, Update nach Breadth-Historie
+Stand: 2026-05-14, Update nach Momentum-Breadth-Erweiterung
 Phase: 1 MVP
 Baseline-Commit: `e9e41bb Create phase 1 MVP baseline`
 
@@ -20,13 +20,13 @@ Das Projekt hat eine funktionierende Phase-1-MVP-Basis:
 - statische HTML-Seiten unter `pages/`
 - GitHub-Actions-Workflow fuer Pages-Build
 - Tests fuer Indikatoren, Storage, Universe-Loader, Pullback-Scanner, Fetch-Replacement und Mock-Integration
-- persistierte Breadth-Historie in `breadth_daily` mit SMA50/SMA200, 52W Highs/Lows und Coverage
+- persistierte Breadth-Historie in `breadth_daily` mit SMA50/SMA200, 52W Highs/Lows, Coverage und Momentum-Breadth-Zaehlungen
 
 Letzte bekannte Verifikation:
 
 ```powershell
 python -m pytest -q -p no:cacheprovider
-# 21 passed
+# 24 passed
 ```
 
 Zusaetzliche lokale Verifikation:
@@ -72,6 +72,7 @@ Neu gehaertet:
 - Extreme Tagesrenditen werden getrennt geloggt als `corporate_action_returns` und `extreme_daily_returns`.
 - Scanner-Coverage wird geloggt: letzter echter Lauf 1150 Symbole gescannt, 93 per Industry ausgeschlossen, 75 Research Hits.
 - Breadth-Historie wird bei `compute` aus den gespeicherten Kursen neu aufgebaut und bei `render` auf `/breadth.html` als Tabelle der letzten 30 Handelstage angezeigt. Die Homepage nutzt dieselbe Historie fuer die Breadth-Sparkline.
+- `/breadth.html` trennt jetzt `Participation Breadth` und `Momentum Breadth`. Participation zeigt SMA50, SMA200, 52W Highs/Lows und Near-52W-High ohne redundanten `valid symbols`-Text in jeder KPI-Karte. Momentum zeigt die wichtigsten Market-Monitor-inspirierten Werte: 4% Up/Down taeglich, 5D- und 10D-Ratio daraus, 25% Up/Down ueber 3M sowie 50% Up/Down ueber 1M. Die Historientabelle enthaelt dieselben neuen Spalten.
 
 ## Scanner-Status
 

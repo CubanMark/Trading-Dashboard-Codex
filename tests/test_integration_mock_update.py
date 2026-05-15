@@ -43,17 +43,47 @@ def test_mock_update_creates_db_and_html():
     assert breadth.exists()
     breadth_html = breadth.read_text(encoding="utf-8")
     assert "Breadth History" in breadth_html
+    assert "SMA50 Breadth" in breadth_html
+    assert "SMA200 Breadth" in breadth_html
+    assert "52W Highs / Lows" in breadth_html
+    assert "Near 52W High" in breadth_html
+    assert "Tactical participation" in breadth_html
+    assert "Structural trend participation" in breadth_html
+    assert "Leadership depth" in breadth_html
+    assert "Momentum Breadth" in breadth_html
+    assert "4% Up / Down" in breadth_html
+    assert "5D 4% Ratio" in breadth_html
+    assert "10D 4% Ratio" in breadth_html
+    assert "25% Up / Down 3M" in breadth_html
+    assert "50% Up / Down 1M" in breadth_html
+    assert "Daily momentum thrust" in breadth_html
+    assert "valid symbols" not in breadth_html
     assert "&gt; SMA200" in breadth_html
     with sqlite3.connect(db) as conn:
         conn.row_factory = sqlite3.Row
         count = conn.execute("SELECT COUNT(*) AS n FROM breadth_daily").fetchone()["n"]
         latest = conn.execute(
-            "SELECT pct_above_sma50, pct_above_sma200, valid_sma50 FROM breadth_daily ORDER BY date DESC LIMIT 1"
+            """
+            SELECT
+                pct_above_sma50, pct_above_sma200, valid_sma50,
+                up_4pct, down_4pct, ratio_4pct_5d, ratio_4pct_10d,
+                up_25pct_3m, down_25pct_3m, up_50pct_1m, down_50pct_1m, valid_momentum
+            FROM breadth_daily
+            ORDER BY date DESC
+            LIMIT 1
+            """
         ).fetchone()
     assert count > 0
     assert latest["pct_above_sma50"] is not None
     assert latest["pct_above_sma200"] is not None
     assert latest["valid_sma50"] == 2
+    assert latest["up_4pct"] is not None
+    assert latest["down_4pct"] is not None
+    assert latest["up_25pct_3m"] is not None
+    assert latest["down_25pct_3m"] is not None
+    assert latest["up_50pct_1m"] is not None
+    assert latest["down_50pct_1m"] is not None
+    assert latest["valid_momentum"] == 2
 
 
 def test_scanner_filter_markup_is_rendered():

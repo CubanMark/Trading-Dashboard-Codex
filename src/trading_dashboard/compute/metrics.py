@@ -169,6 +169,9 @@ def breadth_history_rows(price_map: dict[str, pd.DataFrame], equity_symbols: lis
         prepared["sma200"] = sma(prepared["close"], 200)
         prepared["high_252"] = prepared["close"].rolling(252, min_periods=200).max()
         prepared["low_252"] = prepared["close"].rolling(252, min_periods=200).min()
+        prepared["return_1d"] = prepared["close"].pct_change()
+        prepared["return_1m"] = prepared["close"].pct_change(21)
+        prepared["return_3m"] = prepared["close"].pct_change(63)
         frames.append(prepared)
     if not frames:
         return []
@@ -183,11 +186,18 @@ def breadth_history_rows(price_map: dict[str, pd.DataFrame], equity_symbols: lis
         valid_sma50 = int(sma50_mask.sum())
         valid_sma200 = int(sma200_mask.sum())
         valid_52w = int(high52_mask.sum())
+        momentum_mask = group["return_1d"].notna()
         pct_above_sma50 = percent_true(close[sma50_mask] > group.loc[sma50_mask, "sma50"])
         pct_above_sma200 = percent_true(close[sma200_mask] > group.loc[sma200_mask, "sma200"])
         highs = 0 if valid_52w == 0 else int((close[high52_mask] >= group.loc[high52_mask, "high_252"]).sum())
         lows = 0 if valid_52w == 0 else int((close[high52_mask] <= group.loc[high52_mask, "low_252"]).sum())
         near_high = percent_true(close[high52_mask] >= group.loc[high52_mask, "high_252"] * 0.95)
+        up_4pct = int((group.loc[momentum_mask, "return_1d"] >= 0.04).sum())
+        down_4pct = int((group.loc[momentum_mask, "return_1d"] <= -0.04).sum())
+        up_25pct_3m = int((group["return_3m"].dropna() >= 0.25).sum())
+        down_25pct_3m = int((group["return_3m"].dropna() <= -0.25).sum())
+        up_50pct_1m = int((group["return_1m"].dropna() >= 0.50).sum())
+        down_50pct_1m = int((group["return_1m"].dropna() <= -0.50).sum())
         rows.append(
             {
                 "date": pd.Timestamp(date_value).strftime("%Y-%m-%d"),
@@ -196,14 +206,41 @@ def breadth_history_rows(price_map: dict[str, pd.DataFrame], equity_symbols: lis
                 "new_highs_52w": highs,
                 "new_lows_52w": lows,
                 "pct_within_5pct_52w_high": near_high,
+                "up_4pct": up_4pct,
+                "down_4pct": down_4pct,
+                "ratio_4pct_5d": None,
+                "ratio_4pct_10d": None,
+                "up_25pct_3m": up_25pct_3m,
+                "down_25pct_3m": down_25pct_3m,
+                "up_50pct_1m": up_50pct_1m,
+                "down_50pct_1m": down_50pct_1m,
                 "valid_symbols": valid_symbols,
                 "valid_sma50": valid_sma50,
                 "valid_sma200": valid_sma200,
                 "valid_52w": valid_52w,
+                "valid_momentum": int(momentum_mask.sum()),
                 "status": "ok" if valid_sma50 else "na",
             }
         )
+    add_momentum_ratios(rows)
     return rows
+
+
+def add_momentum_ratios(rows: list[dict]) -> None:
+    for index, row in enumerate(rows):
+        row["ratio_4pct_5d"] = rolling_count_ratio(rows, index, 5)
+        row["ratio_4pct_10d"] = rolling_count_ratio(rows, index, 10)
+
+
+def rolling_count_ratio(rows: list[dict], end_index: int, window: int) -> float | None:
+    if end_index + 1 < window:
+        return None
+    window_rows = rows[end_index - window + 1 : end_index + 1]
+    up_total = sum(int(row.get("up_4pct") or 0) for row in window_rows)
+    down_total = sum(int(row.get("down_4pct") or 0) for row in window_rows)
+    if down_total == 0:
+        return None
+    return float(up_total / down_total)
 
 
 def percent_true(values: pd.Series) -> float | None:
@@ -381,11 +418,15 @@ def write_compute_outputs(
                 """
                 INSERT INTO breadth_daily (
                     date, pct_above_sma50, pct_above_sma200, new_highs_52w, new_lows_52w,
-                    pct_within_5pct_52w_high, valid_symbols, valid_sma50, valid_sma200, valid_52w, status
+                    pct_within_5pct_52w_high, up_4pct, down_4pct, ratio_4pct_5d, ratio_4pct_10d,
+                    up_25pct_3m, down_25pct_3m, up_50pct_1m, down_50pct_1m,
+                    valid_symbols, valid_sma50, valid_sma200, valid_52w, valid_momentum, status
                 )
                 VALUES (
                     :date, :pct_above_sma50, :pct_above_sma200, :new_highs_52w, :new_lows_52w,
-                    :pct_within_5pct_52w_high, :valid_symbols, :valid_sma50, :valid_sma200, :valid_52w, :status
+                    :pct_within_5pct_52w_high, :up_4pct, :down_4pct, :ratio_4pct_5d, :ratio_4pct_10d,
+                    :up_25pct_3m, :down_25pct_3m, :up_50pct_1m, :down_50pct_1m,
+                    :valid_symbols, :valid_sma50, :valid_sma200, :valid_52w, :valid_momentum, :status
                 )
                 """,
                 breadth_rows,

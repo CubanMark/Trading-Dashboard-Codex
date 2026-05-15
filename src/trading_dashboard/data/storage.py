@@ -72,10 +72,19 @@ CREATE TABLE IF NOT EXISTS breadth_daily (
     new_highs_52w INTEGER,
     new_lows_52w INTEGER,
     pct_within_5pct_52w_high REAL,
+    up_4pct INTEGER,
+    down_4pct INTEGER,
+    ratio_4pct_5d REAL,
+    ratio_4pct_10d REAL,
+    up_25pct_3m INTEGER,
+    down_25pct_3m INTEGER,
+    up_50pct_1m INTEGER,
+    down_50pct_1m INTEGER,
     valid_symbols INTEGER NOT NULL,
     valid_sma50 INTEGER NOT NULL,
     valid_sma200 INTEGER NOT NULL,
     valid_52w INTEGER NOT NULL,
+    valid_momentum INTEGER NOT NULL,
     status TEXT NOT NULL
 );
 
@@ -165,6 +174,15 @@ def init_db(db_path: Path) -> None:
         ensure_column(conn, "breadth_daily", "valid_sma50", "INTEGER NOT NULL DEFAULT 0")
         ensure_column(conn, "breadth_daily", "valid_sma200", "INTEGER NOT NULL DEFAULT 0")
         ensure_column(conn, "breadth_daily", "valid_52w", "INTEGER NOT NULL DEFAULT 0")
+        ensure_column(conn, "breadth_daily", "up_4pct", "INTEGER")
+        ensure_column(conn, "breadth_daily", "down_4pct", "INTEGER")
+        ensure_column(conn, "breadth_daily", "ratio_4pct_5d", "REAL")
+        ensure_column(conn, "breadth_daily", "ratio_4pct_10d", "REAL")
+        ensure_column(conn, "breadth_daily", "up_25pct_3m", "INTEGER")
+        ensure_column(conn, "breadth_daily", "down_25pct_3m", "INTEGER")
+        ensure_column(conn, "breadth_daily", "up_50pct_1m", "INTEGER")
+        ensure_column(conn, "breadth_daily", "down_50pct_1m", "INTEGER")
+        ensure_column(conn, "breadth_daily", "valid_momentum", "INTEGER NOT NULL DEFAULT 0")
         ensure_column(conn, "breadth_daily", "status", "TEXT NOT NULL DEFAULT 'ok'")
 
 

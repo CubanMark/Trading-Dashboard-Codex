@@ -183,9 +183,7 @@ def render_detail(slug: str, title: str, data: dict) -> str:
             f"<h2>Industry Leadership</h2>{render_industry_leadership(data['industries'])}"
         )
     elif slug == "breadth":
-        related = [row for row in data["metrics"] if "breadth" in row["metric_id"]]
-        cards = "".join(render_metric_card(row, data.get("breadth", [])) for row in related) or "<p>No dedicated metric rows available yet.</p>"
-        body = f"<h1>{title}</h1><div class='cards'>{cards}</div>{render_breadth_history(data.get('breadth', []))}"
+        body = f"<h1>{title}</h1>{render_breadth_kpis(data.get('breadth', []))}{render_breadth_history(data.get('breadth', []))}"
     else:
         related = [row for row in data["metrics"] if slug.split("-")[0] in row["metric_id"] or title.lower().split()[0] in row["metric_id"]]
         cards = "".join(render_metric_card(row, data.get("breadth", [])) for row in related) or "<p>No dedicated metric rows available yet.</p>"
@@ -216,6 +214,7 @@ def page(title: str, body: str) -> str:
       --yellow: #b58200;
       --red: #c74444;
       --blue: #2368a2;
+      --sparkline: #485563;
     }}
     * {{ box-sizing: border-box; }}
     body {{ margin: 0; font-family: Arial, sans-serif; background: var(--bg); color: var(--text); }}
@@ -408,8 +407,7 @@ def page(title: str, body: str) -> str:
 def render_metric_card(row: dict, breadth_rows: list[dict] | None = None) -> str:
     sparkline = ""
     if row.get("metric_id") == "breadth_sp500_above_sma50" and breadth_rows:
-        spark_color = {"green": "var(--green)", "yellow": "var(--yellow)", "red": "var(--red)"}.get(row.get("status"), "var(--muted)")
-        sparkline = render_sparkline([item.get("pct_above_sma50") for item in breadth_rows], spark_color)
+        sparkline = render_sparkline([item.get("pct_above_sma50") for item in breadth_rows], "var(--sparkline)")
     return f"""
     <article class="metric-card {esc(row['status'])}">
       <strong>{esc(metric_title(row['metric_id']))}</strong>
@@ -479,6 +477,14 @@ def render_breadth_history(rows: list[dict]) -> str:
         f"<td>{int(row.get('new_highs_52w') or 0)}</td>"
         f"<td>{int(row.get('new_lows_52w') or 0)}</td>"
         f"<td>{format_percent_value(row.get('pct_within_5pct_52w_high'))}</td>"
+        f"<td>{int(row.get('up_4pct') or 0)}</td>"
+        f"<td>{int(row.get('down_4pct') or 0)}</td>"
+        f"<td>{format_ratio_value(row.get('ratio_4pct_5d'))}</td>"
+        f"<td>{format_ratio_value(row.get('ratio_4pct_10d'))}</td>"
+        f"<td>{int(row.get('up_25pct_3m') or 0)}</td>"
+        f"<td>{int(row.get('down_25pct_3m') or 0)}</td>"
+        f"<td>{int(row.get('up_50pct_1m') or 0)}</td>"
+        f"<td>{int(row.get('down_50pct_1m') or 0)}</td>"
         f"<td>{int(row.get('valid_symbols') or 0)}</td>"
         "</tr>"
         for row in latest_rows
@@ -486,13 +492,161 @@ def render_breadth_history(rows: list[dict]) -> str:
     return (
         "<section><h2>Breadth History</h2>"
         "<table><thead><tr><th>Date</th><th>&gt; SMA50</th><th>&gt; SMA200</th>"
-        "<th>52W Highs</th><th>52W Lows</th><th>Within 5% High</th><th>Valid</th></tr></thead>"
+        "<th>52W Highs</th><th>52W Lows</th><th>Within 5% High</th>"
+        "<th>4% Up</th><th>4% Down</th><th>5D Ratio</th><th>10D Ratio</th>"
+        "<th>25% Up 3M</th><th>25% Down 3M</th><th>50% Up 1M</th><th>50% Down 1M</th>"
+        "<th>Valid</th></tr></thead>"
         f"<tbody>{body}</tbody></table></section>"
     )
 
 
+def render_breadth_kpis(rows: list[dict]) -> str:
+    if not rows:
+        return "<p>No breadth KPI data available yet.</p>"
+    latest = rows[-1]
+    high_count = int(latest.get("new_highs_52w") or 0)
+    low_count = int(latest.get("new_lows_52w") or 0)
+    cards = [
+        render_breadth_kpi_card(
+            "SMA50 Breadth",
+            f"{format_percent_value(latest.get('pct_above_sma50'))} > SMA50",
+            percent_status(latest.get("pct_above_sma50")),
+            "Tactical participation",
+            render_sparkline([item.get("pct_above_sma50") for item in rows], "var(--sparkline)"),
+        ),
+        render_breadth_kpi_card(
+            "SMA200 Breadth",
+            f"{format_percent_value(latest.get('pct_above_sma200'))} > SMA200",
+            percent_status(latest.get("pct_above_sma200")),
+            "Structural trend participation",
+            render_sparkline([item.get("pct_above_sma200") for item in rows], "var(--sparkline)"),
+        ),
+        render_breadth_kpi_card(
+            "52W Highs / Lows",
+            f"{high_count} / {low_count}",
+            highs_lows_status(high_count, low_count),
+            highs_lows_note(high_count, low_count),
+            "",
+        ),
+        render_breadth_kpi_card(
+            "Near 52W High",
+            f"{format_percent_value(latest.get('pct_within_5pct_52w_high'))}",
+            percent_status(latest.get("pct_within_5pct_52w_high")),
+            "Leadership depth",
+            render_sparkline([item.get("pct_within_5pct_52w_high") for item in rows], "var(--sparkline)"),
+        ),
+    ]
+    return (
+        "<h2>Participation Breadth</h2>"
+        "<div class='cards breadth-kpis'>"
+        + "".join(cards)
+        + "</div>"
+        "<h2>Momentum Breadth</h2>"
+        + render_momentum_kpis(rows)
+    )
+
+
+def render_momentum_kpis(rows: list[dict]) -> str:
+    latest = rows[-1]
+    up_4pct = int(latest.get("up_4pct") or 0)
+    down_4pct = int(latest.get("down_4pct") or 0)
+    up_25pct_3m = int(latest.get("up_25pct_3m") or 0)
+    down_25pct_3m = int(latest.get("down_25pct_3m") or 0)
+    up_50pct_1m = int(latest.get("up_50pct_1m") or 0)
+    down_50pct_1m = int(latest.get("down_50pct_1m") or 0)
+    cards = [
+        render_breadth_kpi_card(
+            "4% Up / Down",
+            f"{up_4pct} / {down_4pct}",
+            highs_lows_status(up_4pct, down_4pct),
+            "Daily momentum thrust",
+            "",
+        ),
+        render_breadth_kpi_card(
+            "5D 4% Ratio",
+            format_ratio_value(latest.get("ratio_4pct_5d")),
+            ratio_status(latest.get("ratio_4pct_5d")),
+            "Short-term burst balance",
+            render_sparkline([item.get("ratio_4pct_5d") for item in rows], "var(--sparkline)"),
+        ),
+        render_breadth_kpi_card(
+            "10D 4% Ratio",
+            format_ratio_value(latest.get("ratio_4pct_10d")),
+            ratio_status(latest.get("ratio_4pct_10d")),
+            "Two-week burst balance",
+            render_sparkline([item.get("ratio_4pct_10d") for item in rows], "var(--sparkline)"),
+        ),
+        render_breadth_kpi_card(
+            "25% Up / Down 3M",
+            f"{up_25pct_3m} / {down_25pct_3m}",
+            highs_lows_status(up_25pct_3m, down_25pct_3m),
+            "Quarter momentum extremes",
+            "",
+        ),
+        render_breadth_kpi_card(
+            "50% Up / Down 1M",
+            f"{up_50pct_1m} / {down_50pct_1m}",
+            highs_lows_status(up_50pct_1m, down_50pct_1m),
+            "One-month speculative heat",
+            "",
+        ),
+    ]
+    return "<div class='cards breadth-kpis momentum-kpis'>" + "".join(cards) + "</div>"
+
+
+def render_breadth_kpi_card(title: str, label: str, status: str, note: str, sparkline: str) -> str:
+    return (
+        f"<article class='metric-card {esc(status)}'>"
+        f"<strong>{esc(title)}</strong>"
+        f"<div class='big'>{esc(label)}</div>"
+        f"{sparkline}"
+        f"<p class='muted'>{esc(note)}</p>"
+        "</article>"
+    )
+
+
+def percent_status(value: float | None) -> str:
+    if value is None:
+        return "na"
+    if value > 60:
+        return "green"
+    if value >= 40:
+        return "yellow"
+    return "red"
+
+
+def highs_lows_status(highs: int, lows: int) -> str:
+    if highs > lows:
+        return "green"
+    if highs == lows:
+        return "yellow"
+    return "red"
+
+
+def highs_lows_note(highs: int, lows: int) -> str:
+    if highs > lows:
+        return "Expansion leads breakdowns"
+    if highs == lows:
+        return "Balanced leadership and stress"
+    return "Breakdowns exceed leadership"
+
+
+def ratio_status(value: float | None) -> str:
+    if value is None:
+        return "na"
+    if value > 1.5:
+        return "green"
+    if value >= 0.75:
+        return "yellow"
+    return "red"
+
+
 def format_percent_value(value: float | None) -> str:
     return "N/A" if value is None else f"{float(value):.0f}%"
+
+
+def format_ratio_value(value: float | None) -> str:
+    return "N/A" if value is None else f"{float(value):.2f}"
 
 
 def none_last(value: float | None) -> float:
