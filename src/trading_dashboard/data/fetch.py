@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 import numpy as np
@@ -58,7 +58,14 @@ def cnn_fear_greed_rows(years: int) -> list[dict]:
 
     start = date.today() - timedelta(days=min(365, int(years * 365.25)))
     url = f"https://production.dataviz.cnn.io/index/fearandgreed/graphdata/{start.isoformat()}"
-    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Accept": "application/json, text/plain, */*",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Referer": "https://edition.cnn.com/markets/fear-and-greed",
+        "Origin": "https://edition.cnn.com",
+    }
+    req = urllib.request.Request(url, headers=headers)
     with urllib.request.urlopen(req, timeout=15) as resp:
         payload = json.loads(resp.read().decode())
     rows: list[dict] = []
@@ -70,7 +77,11 @@ def cnn_fear_greed_rows(years: int) -> list[dict]:
             continue
         date_str = datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc).strftime("%Y-%m-%d")
         rows.append({"date": date_str, "score": float(score), "rating": str(rating), "source": "cnn"})
-    return sorted(rows, key=lambda r: r["date"])
+    # CNN API can return two intraday entries for the current day; keep the last (most recent) per date
+    deduped: dict[str, dict] = {}
+    for row in rows:
+        deduped[row["date"]] = row
+    return sorted(deduped.values(), key=lambda r: r["date"])
 
 
 def _fg_rating(score: float) -> str:
