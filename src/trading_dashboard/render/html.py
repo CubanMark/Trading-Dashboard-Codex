@@ -113,6 +113,21 @@ def load_render_data(settings: Settings) -> dict:
         sentiment = conn.execute(
             "SELECT date, score, rating FROM sentiment_daily ORDER BY date"
         ).fetchall()
+        risk_raw = conn.execute(
+            "SELECT symbol, date, close FROM prices"
+            " WHERE symbol IN ('XLY','XLP') AND close IS NOT NULL"
+            " AND date >= date('now','-400 days') ORDER BY symbol, date"
+        ).fetchall()
+        vol_raw = conn.execute(
+            "SELECT symbol, date, close FROM prices"
+            " WHERE symbol IN ('^VIX','^VIX3M') AND close IS NOT NULL"
+            " AND date >= date('now','-400 days') ORDER BY symbol, date"
+        ).fetchall()
+        credit_raw = conn.execute(
+            "SELECT symbol, date, close FROM prices"
+            " WHERE symbol IN ('TLT','HYG','LQD') AND close IS NOT NULL"
+            " AND date >= date('now','-400 days') ORDER BY symbol, date"
+        ).fetchall()
     history_by_symbol: dict[str, list[float]] = {}
     for row in index_history:
         if row["close"] is not None:
@@ -137,7 +152,17 @@ def load_render_data(settings: Settings) -> dict:
         "operation": operation_summary([dict(row) for row in sources], [dict(row) for row in quality], active_equities, priced_equities),
         "indexes": sort_index_rows(index_rows),
         "sentiment": [dict(row) for row in sentiment],
+        "risk_history": _group_price_rows(risk_raw),
+        "volatility_history": _group_price_rows(vol_raw),
+        "credit_history": _group_price_rows(credit_raw),
     }
+
+
+def _group_price_rows(rows: list) -> dict[str, list[dict]]:
+    result: dict[str, list[dict]] = {}
+    for row in rows:
+        result.setdefault(str(row["symbol"]), []).append({"date": str(row["date"]), "close": float(row["close"])})
+    return result
 
 
 def sort_index_rows(rows: list[dict]) -> list[dict]:
@@ -241,6 +266,12 @@ def render_detail(slug: str, title: str, data: dict) -> str:
         )
     elif slug == "sentiment":
         body = f"<h1>{title}</h1>{render_sentiment_detail(data.get('sentiment', []))}"
+    elif slug == "risk":
+        body = f"<h1>{title}</h1>{render_risk_detail(data.get('risk_history', {}), data.get('metrics', []))}"
+    elif slug == "volatility":
+        body = f"<h1>{title}</h1>{render_volatility_detail(data.get('volatility_history', {}), data.get('metrics', []))}"
+    elif slug == "credit-macro":
+        body = f"<h1>{title}</h1>{render_credit_detail(data.get('credit_history', {}), data.get('metrics', []))}"
     else:
         related = [row for row in data["metrics"] if slug.split("-")[0] in row["metric_id"] or title.lower().split()[0] in row["metric_id"]]
         cards = "".join(render_metric_card(row, data.get("breadth", [])) for row in related) or "<p>No dedicated metric rows available yet.</p>"
@@ -1482,6 +1513,155 @@ def format_metric_change(metric_id: str, change: float) -> str:
     if metric_id == "volatility_vix":
         return f"{change:+.1f}"
     return f"{change:+.1f}"
+
+
+def render_risk_detail(price_map: dict[str, list[dict]], metrics: list[dict]) -> str:
+    xly = price_map.get("XLY", [])
+    xlp = price_map.get("XLP", [])
+    risk_m = next((m for m in metrics if m.get("metric_id") == "risk_xly_xlp_trend"), None)
+    if not xly or not xlp:
+        return "<section><h2>XLY / XLP</h2><p>No price data available yet.</p></section>"
+    xly_by_date = {r["date"]: r["close"] for r in xly}
+    xlp_by_date = {r["date"]: r["close"] for r in xlp}
+    common = sorted(set(xly_by_date) & set(xlp_by_date))
+    ratios = [xly_by_date[d] / xlp_by_date[d] for d in common if xlp_by_date[d] > 0]
+    if not ratios:
+        return "<section><h2>XLY / XLP</h2><p>Insufficient data.</p></section>"
+    current_ratio = ratios[-1]
+    prior_ratio = ratios[-6] if len(ratios) >= 6 else None
+    ratio_change = current_ratio / prior_ratio - 1 if prior_ratio else None
+    ratio_status = "green" if ratio_change and ratio_change > 0 else ("red" if ratio_change and ratio_change < 0 else "yellow")
+    ratio_note = f"5D change {ratio_change:+.2%}" if ratio_change is not None else ""
+    ratio_spark = render_sparkline(ratios[-120:], "var(--sparkline)")
+    xly_spark = render_sparkline([r["close"] for r in xly[-120:]], "#2368a2")
+    xlp_spark = render_sparkline([r["close"] for r in xlp[-120:]], "#e88b3c")
+    metric_note = esc(str(risk_m.get("note", ""))) if risk_m else ""
+    metric_status = str(risk_m.get("status", "na")) if risk_m else "na"
+    return (
+        "<p class='muted'>Consumer Discretionary (XLY) vs Consumer Staples (XLP) — "
+        "rising ratio = risk-on, falling = risk-off.</p>"
+        "<section>"
+        "<h2>XLY / XLP Ratio</h2>"
+        f"<div class='cards' style='grid-template-columns:repeat(3,minmax(0,1fr));'>"
+        f"<article class='metric-card {ratio_status}'>"
+        f"<strong>XLY/XLP Ratio</strong>"
+        f"<div class='big'>{current_ratio:.3f}</div>"
+        f"<div class='muted'>{ratio_note}</div>"
+        f"{ratio_spark}</article>"
+        f"<article class='metric-card na'>"
+        f"<strong>XLY (Discretionary)</strong>"
+        f"<div class='big'>${xly[-1]['close']:.2f}</div>"
+        f"{xly_spark}</article>"
+        f"<article class='metric-card na'>"
+        f"<strong>XLP (Staples)</strong>"
+        f"<div class='big'>${xlp[-1]['close']:.2f}</div>"
+        f"{xlp_spark}</article>"
+        f"</div>"
+        f"<p class='muted'>{metric_note}</p>"
+        "</section>"
+    )
+
+
+def render_volatility_detail(price_map: dict[str, list[dict]], metrics: list[dict]) -> str:
+    vix = price_map.get("^VIX", [])
+    vix3m = price_map.get("^VIX3M", [])
+    if not vix:
+        return "<section><h2>VIX</h2><p>No VIX data available yet.</p></section>"
+    current_vix = vix[-1]["close"]
+    vix_status = "green" if current_vix < 20 else ("red" if current_vix >= 30 else "yellow")
+    vix_spark = render_sparkline([r["close"] for r in vix[-252:]], "#cf5f69")
+    cards = (
+        f"<article class='metric-card {vix_status}'>"
+        f"<strong>VIX</strong>"
+        f"<div class='big'>{current_vix:.1f}</div>"
+        f"<div class='muted'>{'Low' if current_vix < 20 else ('Elevated' if current_vix < 30 else 'High')} vol regime</div>"
+        f"{vix_spark}</article>"
+    )
+    term_note = ""
+    if vix3m:
+        current_vix3m = vix3m[-1]["close"]
+        vix3m_spark = render_sparkline([r["close"] for r in vix3m[-252:]], "#e88b3c")
+        vix_by_date = {r["date"]: r["close"] for r in vix}
+        vix3m_by_date = {r["date"]: r["close"] for r in vix3m}
+        common = sorted(set(vix_by_date) & set(vix3m_by_date))
+        term_series = [vix_by_date[d] / vix3m_by_date[d] for d in common if vix3m_by_date[d] > 0]
+        term_ratio = term_series[-1] if term_series else None
+        term_status = "red" if term_ratio and term_ratio > 1 else "green"
+        term_label = "Backwardation (stressed)" if term_ratio and term_ratio > 1 else "Contango (normal)"
+        term_spark = render_sparkline(term_series[-252:], "#6aaa64") if term_series else ""
+        cards += (
+            f"<article class='metric-card na'>"
+            f"<strong>VIX3M</strong>"
+            f"<div class='big'>{current_vix3m:.1f}</div>"
+            f"{vix3m_spark}</article>"
+            f"<article class='metric-card {term_status}'>"
+            f"<strong>VIX / VIX3M (term structure)</strong>"
+            f"<div class='big'>{term_ratio:.2f}</div>"
+            f"<div class='muted'>{esc(term_label)}</div>"
+            f"{term_spark}</article>"
+        )
+        term_note = f"VIX/VIX3M &gt; 1 signals near-term stress (backwardation); &lt; 1 is normal (contango). Current: {term_ratio:.2f}."
+    return (
+        "<p class='muted'>VIX below 20 = calm; 20–30 = elevated caution; above 30 = high fear. "
+        f"{term_note}</p>"
+        "<section>"
+        "<h2>Volatility</h2>"
+        f"<div class='cards' style='grid-template-columns:repeat(3,minmax(0,1fr));'>{cards}</div>"
+        "</section>"
+    )
+
+
+def render_credit_detail(price_map: dict[str, list[dict]], metrics: list[dict]) -> str:
+    tlt = price_map.get("TLT", [])
+    hyg = price_map.get("HYG", [])
+    lqd = price_map.get("LQD", [])
+    cards = ""
+    for sym, rows, color in [("TLT", tlt, "#2368a2"), ("HYG", hyg, "#15816f"), ("LQD", lqd, "#e88b3c")]:
+        if not rows:
+            continue
+        window = rows[-252:] if len(rows) >= 252 else rows
+        base = window[0]["close"]
+        indexed = [r["close"] / base * 100 for r in window] if base > 0 else []
+        current = rows[-1]["close"]
+        change_1y = current / rows[0]["close"] - 1 if len(rows) >= 2 else None
+        status = "green" if change_1y and change_1y > 0.02 else ("red" if change_1y and change_1y < -0.02 else "yellow")
+        change_label = f"{change_1y:+.1%} 1Y" if change_1y is not None else ""
+        spark = render_sparkline(indexed, color)
+        cards += (
+            f"<article class='metric-card {status}'>"
+            f"<strong>{sym}</strong>"
+            f"<div class='big'>${current:.2f}</div>"
+            f"<div class='muted'>{change_label}</div>"
+            f"{spark}</article>"
+        )
+    if hyg and lqd:
+        hyg_by_date = {r["date"]: r["close"] for r in hyg}
+        lqd_by_date = {r["date"]: r["close"] for r in lqd}
+        common = sorted(set(hyg_by_date) & set(lqd_by_date))
+        spread = [hyg_by_date[d] / lqd_by_date[d] for d in common if lqd_by_date[d] > 0]
+        if spread:
+            current_spread = spread[-1]
+            base_spread = spread[0]
+            spread_chg = current_spread / base_spread - 1 if base_spread > 0 else None
+            spread_status = "green" if spread_chg and spread_chg > 0.005 else ("red" if spread_chg and spread_chg < -0.005 else "yellow")
+            spread_spark = render_sparkline(spread[-252:], "#b58200")
+            cards += (
+                f"<article class='metric-card {spread_status}'>"
+                f"<strong>HYG / LQD (spread proxy)</strong>"
+                f"<div class='big'>{current_spread:.3f}</div>"
+                f"<div class='muted'>HY vs IG credit</div>"
+                f"{spread_spark}</article>"
+            )
+    if not cards:
+        return "<section><h2>Credit &amp; Rates</h2><p>No price data available yet.</p></section>"
+    return (
+        "<p class='muted'>TLT, HYG, LQD from local DB — indexed to 100 at start of window. "
+        "FRED HY-OAS not configured; HYG/LQD ratio shown as spread proxy.</p>"
+        "<section>"
+        "<h2>Credit &amp; Rates</h2>"
+        f"<div class='cards' style='grid-template-columns:repeat(4,minmax(0,1fr));'>{cards}</div>"
+        "</section>"
+    )
 
 
 def _fg_rating_label(score: float) -> str:
