@@ -110,6 +110,9 @@ def load_render_data(settings: Settings) -> dict:
             ORDER BY symbol, date
             """
         ).fetchall()
+        sentiment = conn.execute(
+            "SELECT date, score, rating FROM sentiment_daily ORDER BY date"
+        ).fetchall()
     history_by_symbol: dict[str, list[float]] = {}
     for row in index_history:
         if row["close"] is not None:
@@ -133,6 +136,7 @@ def load_render_data(settings: Settings) -> dict:
         "sources": [dict(row) for row in sources],
         "operation": operation_summary([dict(row) for row in sources], [dict(row) for row in quality], active_equities, priced_equities),
         "indexes": sort_index_rows(index_rows),
+        "sentiment": [dict(row) for row in sentiment],
     }
 
 
@@ -235,6 +239,8 @@ def render_detail(slug: str, title: str, data: dict) -> str:
             f"{render_breadth_composite_chart(data.get('breadth_composite_chart', []))}"
             f"{render_breadth_history(data.get('breadth', []))}"
         )
+    elif slug == "sentiment":
+        body = f"<h1>{title}</h1>{render_sentiment_detail(data.get('sentiment', []))}"
     else:
         related = [row for row in data["metrics"] if slug.split("-")[0] in row["metric_id"] or title.lower().split()[0] in row["metric_id"]]
         cards = "".join(render_metric_card(row, data.get("breadth", [])) for row in related) or "<p>No dedicated metric rows available yet.</p>"
@@ -301,6 +307,10 @@ def page(title: str, body: str) -> str:
     .yellow {{ border-top: 5px solid var(--yellow); }}
     .red {{ border-top: 5px solid var(--red); }}
     .na {{ border-top: 5px solid var(--muted); }}
+    .fg-gauge-wrap {{ display: grid; gap: 6px; margin: 0 0 16px; }}
+    .fg-gauge-track {{ position: relative; height: 18px; border-radius: 999px; background: linear-gradient(90deg,#cf5f69 0%,#e88b3c 25%,#b58200 45%,#6aaa64 55%,#15816f 100%); border: 1px solid var(--line); }}
+    .fg-gauge-marker {{ position: absolute; top: -6px; width: 4px; height: 30px; border-radius: 999px; background: #18202a; transform: translateX(-50%); box-shadow: 0 0 0 3px rgba(255,255,255,.85); }}
+    .fg-gauge-labels {{ display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); font-weight: 700; }}
     .status-strong-red {{ border-top: 5px solid #cf5f69; }}
     .status-light-red {{ border-top: 5px solid #eda4aa; }}
     .status-neutral {{ border-top: 5px solid #d8dee8; }}
@@ -1472,6 +1482,91 @@ def format_metric_change(metric_id: str, change: float) -> str:
     if metric_id == "volatility_vix":
         return f"{change:+.1f}"
     return f"{change:+.1f}"
+
+
+def _fg_rating_label(score: float) -> str:
+    if score <= 25:
+        return "Extreme Fear"
+    if score <= 45:
+        return "Fear"
+    if score <= 55:
+        return "Neutral"
+    if score <= 75:
+        return "Greed"
+    return "Extreme Greed"
+
+
+def _fg_status(score: float | None) -> str:
+    if score is None:
+        return "na"
+    if score >= 56:
+        return "green"
+    if score >= 46:
+        return "yellow"
+    return "red"
+
+
+def _fg_snapshot_card(title: str, score: float | None, rating: str = "") -> str:
+    if score is None:
+        return (
+            f"<article class='metric-card na'>"
+            f"<strong>{esc(title)}</strong>"
+            f"<div class='big'>N/A</div>"
+            f"</article>"
+        )
+    label = rating or _fg_rating_label(score)
+    return (
+        f"<article class='metric-card {_fg_status(score)}'>"
+        f"<strong>{esc(title)}</strong>"
+        f"<div class='big'>{score:.0f}</div>"
+        f"<div class='muted'>{esc(label)}</div>"
+        f"</article>"
+    )
+
+
+def render_sentiment_detail(rows: list[dict]) -> str:
+    if not rows:
+        return (
+            "<section><h2>CNN Fear &amp; Greed Index</h2>"
+            "<p>No data available yet. Will be fetched on the next <code>update</code> run.</p></section>"
+        )
+    latest = rows[-1]
+    score = float(latest["score"])
+    rating = str(latest["rating"])
+    date_str = str(latest.get("date", ""))[:10]
+    prev_score = float(rows[-2]["score"]) if len(rows) >= 2 else None
+    week_score = float(rows[-6]["score"]) if len(rows) >= 6 else None
+    month_score = float(rows[-22]["score"]) if len(rows) >= 22 else None
+    marker_pct = max(2.0, min(98.0, score))
+    cards = (
+        _fg_snapshot_card("Current", score, rating)
+        + _fg_snapshot_card("Previous Close", prev_score)
+        + _fg_snapshot_card("1 Week Ago", week_score)
+        + _fg_snapshot_card("1 Month Ago", month_score)
+    )
+    sparkline_values = [float(r["score"]) for r in rows[-252:]]
+    sparkline = render_sparkline(sparkline_values, "var(--sparkline)")
+    return (
+        f"<p class='muted'>As of {esc(date_str)} — CNN Fear &amp; Greed Index"
+        " (0 = Extreme Fear, 100 = Extreme Greed)</p>"
+        "<section>"
+        "<h2>Current Reading</h2>"
+        "<div class='fg-gauge-wrap'>"
+        f"<div class='fg-gauge-track'>"
+        f"<div class='fg-gauge-marker' style='left:{marker_pct:.1f}%'></div>"
+        f"</div>"
+        "<div class='fg-gauge-labels'>"
+        "<span>Extreme Fear</span><span>Fear</span><span>Neutral</span>"
+        "<span>Greed</span><span>Extreme Greed</span>"
+        "</div>"
+        "</div>"
+        f"<div class='cards' style='grid-template-columns:repeat(4,minmax(0,1fr));'>{cards}</div>"
+        "</section>"
+        "<section>"
+        "<h2>1-Year History</h2>"
+        f"<div style='height:80px;padding:4px 0;'>{sparkline}</div>"
+        "</section>"
+    )
 
 
 def metric_title(metric_id: str) -> str:

@@ -158,6 +158,13 @@ CREATE TABLE IF NOT EXISTS extreme_return_events (
     source TEXT NOT NULL,
     PRIMARY KEY (symbol, date)
 );
+
+CREATE TABLE IF NOT EXISTS sentiment_daily (
+    date TEXT PRIMARY KEY,
+    score REAL NOT NULL,
+    rating TEXT NOT NULL,
+    source TEXT NOT NULL
+);
 """
 
 
@@ -361,6 +368,23 @@ def replace_table_rows(db_path: Path, table: str, rows: list[dict], key_where: s
         if key_where:
             conn.execute(f"DELETE FROM {table} WHERE {key_where}", key_args)
         conn.executemany(f"INSERT INTO {table} ({col_list}) VALUES ({placeholders})", rows)
+
+
+def replace_sentiment_rows(db_path: Path, rows: list[dict]) -> None:
+    if not rows:
+        return
+    with connect(db_path) as conn:
+        conn.execute("DELETE FROM sentiment_daily")
+        conn.executemany(
+            "INSERT INTO sentiment_daily (date, score, rating, source) VALUES (:date, :score, :rating, :source)",
+            rows,
+        )
+
+
+def read_sentiment_rows(db_path: Path) -> list[dict]:
+    with connect(db_path) as conn:
+        rows = conn.execute("SELECT date, score, rating FROM sentiment_daily ORDER BY date").fetchall()
+    return [dict(row) for row in rows]
 
 
 def read_prices(db_path: Path, symbols: list[str] | None = None) -> pd.DataFrame:

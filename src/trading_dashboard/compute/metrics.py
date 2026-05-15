@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 import pandas as pd
 
 from ..config import EXCLUDED_PULLBACK_SUB_INDUSTRIES, SECTOR_ETFS, Settings
-from ..data.storage import clear_computed_outputs, connect, log_quality, read_prices
+from ..data.storage import clear_computed_outputs, connect, log_quality, read_prices, read_sentiment_rows
 from ..scanners.pullback import pullback_hits
 from .indicators import atr, last_valid, pct_change_over, sma
 
@@ -24,8 +24,9 @@ def compute_all_metrics(settings: Settings) -> None:
     symbol_meta = load_symbol_metadata(settings)
     log_compute_quality(settings, price_map, equity_symbols, symbol_meta)
     excluded_scanner_symbols = load_scanner_excluded_symbols(settings)
+    sentiment_rows = read_sentiment_rows(settings.db_path)
     breadth_rows = breadth_history_rows(price_map, equity_symbols)
-    metric_rows = dimension_metric_rows(price_map, latest_date, equity_symbols, breadth_rows)
+    metric_rows = dimension_metric_rows(price_map, latest_date, equity_symbols, breadth_rows, sentiment_rows)
     sector_rows = sector_return_rows(price_map, latest_date)
     scanner_rows = pullback_hits(price_map, latest_date, equity_symbols, symbol_meta, excluded_scanner_symbols)
     log_scanner_quality(settings, price_map, equity_symbols, symbol_meta, scanner_rows)
@@ -46,10 +47,11 @@ def dimension_metric_rows(
     latest_date: str,
     equity_symbols: list[str],
     breadth_rows: list[dict] | None = None,
+    sentiment_rows: list[dict] | None = None,
 ) -> list[dict]:
     rows = [
         breadth_metric(price_map, latest_date, equity_symbols, breadth_rows or []),
-        sentiment_metric(latest_date),
+        sentiment_metric(latest_date, sentiment_rows),
         risk_metric(price_map, latest_date),
         credit_metric(latest_date),
         volatility_metric(price_map, latest_date),
@@ -254,15 +256,41 @@ def fmt_pct(value: float | None) -> str:
     return "N/A" if value is None or pd.isna(value) else f"{value:.0f}%"
 
 
-def sentiment_metric(latest_date: str) -> dict:
+def sentiment_metric(latest_date: str, sentiment_rows: list[dict] | None = None) -> dict:
+    if not sentiment_rows:
+        return metric(
+            "sentiment_fear_greed",
+            latest_date,
+            None,
+            "Not available",
+            "na",
+            "flat",
+            "Fear & Greed source is optional in Phase 1; no fallback value is fabricated",
+        )
+    latest = sentiment_rows[-1]
+    score = float(latest["score"])
+    rating = str(latest["rating"])
+    prior = float(sentiment_rows[-2]["score"]) if len(sentiment_rows) >= 2 else None
+    week_ago = float(sentiment_rows[-6]["score"]) if len(sentiment_rows) >= 6 else None
+    month_ago = float(sentiment_rows[-22]["score"]) if len(sentiment_rows) >= 22 else None
+    status = traffic_light(score, score >= 56, 46 <= score <= 55)
+    trend = trend_from_change(score, prior)
+    parts = [f"CNN F&G {score:.0f} ({rating})"]
+    if prior is not None:
+        parts.append(f"prev {prior:.0f}")
+    if week_ago is not None:
+        parts.append(f"1w {week_ago:.0f}")
+    if month_ago is not None:
+        parts.append(f"1m {month_ago:.0f}")
     return metric(
         "sentiment_fear_greed",
         latest_date,
-        None,
-        "Not available",
-        "na",
-        "flat",
-        "Fear & Greed source is optional in Phase 1; no fallback value is fabricated",
+        score,
+        f"{score:.0f} — {rating}",
+        status,
+        trend,
+        "; ".join(parts),
+        prior_value=prior,
     )
 
 

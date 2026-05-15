@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 
 from ..config import INDEX_SYMBOLS, SECTOR_ETFS, SYMBOL_SECTORS, Settings
-from .storage import log_quality, log_run, replace_actions, replace_extreme_return_events, replace_prices, upsert_symbols
+from .storage import log_quality, log_run, replace_actions, replace_extreme_return_events, replace_prices, replace_sentiment_rows, upsert_symbols
 from .universe import load_equity_universe
 
 COMMON_SPLIT_RATIOS = (2.0, 3.0, 4.0, 5.0, 10.0)
@@ -21,6 +21,7 @@ def fetch_prices(settings: Settings, use_mock: bool = False) -> None:
         replace_actions(settings.db_path, actions, "mock", settings.all_price_symbols)
         log_quality(settings.db_path, "fetch_source", "warning", "Used deterministic mock price data")
         quality_check_prices(settings, prices, actions, "mock")
+        fetch_sentiment(settings.db_path, settings.years, use_mock=True)
         return
 
     try:
@@ -36,6 +37,64 @@ def fetch_prices(settings: Settings, use_mock: bool = False) -> None:
     replace_prices(settings.db_path, prices, source, replacement_symbols)
     replace_actions(settings.db_path, actions, source, replacement_symbols)
     quality_check_prices(settings, prices, actions, source)
+    fetch_sentiment(settings.db_path, settings.years, use_mock=(source == "mock-fallback"))
+
+
+def fetch_sentiment(db_path: "Path", years: int, use_mock: bool = False) -> None:
+    if use_mock:
+        replace_sentiment_rows(db_path, mock_sentiment_rows(years))
+        return
+    try:
+        rows = cnn_fear_greed_rows(years)
+        replace_sentiment_rows(db_path, rows)
+        log_quality(db_path, "sentiment_fetch", "ok", f"{len(rows)} Fear & Greed rows from CNN")
+    except Exception as exc:
+        log_quality(db_path, "sentiment_fetch", "warning", f"CNN Fear & Greed fetch failed: {exc}")
+
+
+def cnn_fear_greed_rows(years: int) -> list[dict]:
+    import json
+    import urllib.request
+
+    start = date.today() - timedelta(days=min(365, int(years * 365.25)))
+    url = f"https://production.dataviz.cnn.io/index/fearandgreed/graphdata/{start.isoformat()}"
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        payload = json.loads(resp.read().decode())
+    rows: list[dict] = []
+    for point in payload.get("fear_and_greed_historical", {}).get("data", []):
+        ts_ms = point.get("x")
+        score = point.get("y")
+        rating = point.get("rating", "")
+        if ts_ms is None or score is None:
+            continue
+        date_str = datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc).strftime("%Y-%m-%d")
+        rows.append({"date": date_str, "score": float(score), "rating": str(rating), "source": "cnn"})
+    return sorted(rows, key=lambda r: r["date"])
+
+
+def _fg_rating(score: float) -> str:
+    if score <= 25:
+        return "Extreme Fear"
+    if score <= 45:
+        return "Fear"
+    if score <= 55:
+        return "Neutral"
+    if score <= 75:
+        return "Greed"
+    return "Extreme Greed"
+
+
+def mock_sentiment_rows(years: int) -> list[dict]:
+    end = pd.Timestamp.today().normalize()
+    periods = min(252, max(22, int(min(1, years) * 252)))
+    dates = pd.bdate_range(end=end, periods=periods)
+    rng = np.random.default_rng(42)
+    scores = np.clip(50 + np.cumsum(rng.normal(0, 1.5, len(dates))), 5, 95)
+    return [
+        {"date": d.strftime("%Y-%m-%d"), "score": float(s), "rating": _fg_rating(float(s)), "source": "mock"}
+        for d, s in zip(dates, scores)
+    ]
 
 
 def symbol_rows(settings: Settings) -> list[dict]:
