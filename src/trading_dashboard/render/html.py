@@ -45,7 +45,20 @@ def load_render_data(settings: Settings) -> dict:
         runs = conn.execute("SELECT * FROM run_log ORDER BY id DESC LIMIT 8").fetchall()
         quality = conn.execute("SELECT * FROM data_quality_checks ORDER BY id DESC LIMIT 12").fetchall()
         extreme_returns = conn.execute(
-            "SELECT * FROM extreme_return_events ORDER BY ABS(COALESCE(daily_return, 0)) DESC, symbol LIMIT 20"
+            """
+            SELECT * FROM extreme_return_events
+            ORDER BY
+              CASE label
+                WHEN 'missing_corporate_action' THEN 0
+                WHEN 'possible_data_error' THEN 1
+                WHEN 'corporate_action' THEN 2
+                WHEN 'likely_real_move' THEN 3
+                ELSE 4
+              END,
+              ABS(COALESCE(daily_return, 0)) DESC,
+              symbol
+            LIMIT 20
+            """
         ).fetchall()
         sources = conn.execute("SELECT source, COUNT(*) AS n, MAX(date) AS max_date FROM prices GROUP BY source ORDER BY source").fetchall()
         breadth = conn.execute("SELECT * FROM breadth_daily ORDER BY date DESC LIMIT 90").fetchall()
@@ -292,6 +305,10 @@ def page(title: str, body: str) -> str:
     .loggrid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }}
     .quality-detail {{ margin-top: 16px; }}
     .quality-label {{ display: inline-block; padding: 2px 6px; border-radius: 4px; background: #eef2f7; color: #334155; font-size: 12px; font-weight: 700; }}
+    .quality-label.missing_corporate_action {{ color: #8a5a00; background: #fff7e0; border: 1px solid #f0c36a; }}
+    .quality-label.possible_data_error {{ color: #991b1b; background: #fee2e2; border: 1px solid #fecaca; }}
+    .quality-label.corporate_action {{ color: #075985; background: #e0f2fe; border: 1px solid #bae6fd; }}
+    .quality-label.likely_real_move {{ color: #334155; background: #f1f5f9; border: 1px solid #e2e8f0; }}
     @media (max-width: 1100px) {{
       .metric-grid, .cards {{ grid-template-columns: repeat(3, minmax(0, 1fr)); }}
     }}
@@ -319,10 +336,11 @@ def page(title: str, body: str) -> str:
 <body>
 {body}
 <script>
-  document.querySelectorAll('[data-scanner-table]').forEach((table) => {{
+  document.querySelectorAll('[data-filter-table]').forEach((table) => {{
     const container = table.closest('section') || document;
     const rows = Array.from(table.querySelectorAll('tbody tr'));
-    const count = container.querySelector('[data-scanner-count]');
+    const count = container.querySelector('[data-visible-count]');
+    const countLabel = count ? (count.dataset.countLabel || 'rows') : 'rows';
     const filters = Array.from(container.querySelectorAll('[data-table-filter]'));
     const rowMatches = (row, ignoredFilter) => filters.every((filter) => {{
       if (filter === ignoredFilter) return true;
@@ -362,12 +380,12 @@ def page(title: str, body: str) -> str:
         row.style.display = show ? '' : 'none';
         if (show) visible += 1;
       }});
-      if (count) count.textContent = `${{visible}} hits shown`;
+      if (count) count.textContent = `${{visible}} ${{countLabel}} shown`;
     }};
     filters.forEach((filter) => filter.addEventListener('change', update));
     update();
   }});
-  document.querySelectorAll('[data-scanner-table]').forEach((table) => {{
+  document.querySelectorAll('[data-sort-table]').forEach((table) => {{
     const tbody = table.querySelector('tbody');
     const buttons = Array.from(table.querySelectorAll('[data-sort-key]'));
     const rows = Array.from(tbody.querySelectorAll('tr'));
@@ -750,9 +768,9 @@ def render_hits_table(hits: list[dict]) -> str:
         f"<select id='scanner-filter-sector' data-table-filter data-filter-key='sector'>{sector_options}</select>"
         "<label for='scanner-filter-industry'>Industry</label>"
         f"<select id='scanner-filter-industry' data-table-filter data-filter-key='industry'>{industry_options}</select>"
-        f"<span class='muted' data-scanner-count>{len(hits)} hits shown</span>"
+        f"<span class='muted' data-visible-count data-count-label='hits'>{len(hits)} hits shown</span>"
         "</div>"
-        "<table data-scanner-table><thead><tr>"
+        "<table data-filter-table data-sort-table><thead><tr>"
         f"{sort_header('Setup', 'setup', 'ascending')}"
         f"{sort_header('Ticker', 'ticker', 'ascending')}"
         f"{sort_header('Sector', 'sector', 'ascending')}"
@@ -827,25 +845,72 @@ def render_logs(data: dict) -> str:
 def render_extreme_return_events(rows: list[dict]) -> str:
     if not rows:
         return ""
+    label_options = render_quality_label_options(rows)
+    counts = quality_label_counts(rows)
+    count_text = ", ".join(f"{label}: {count}" for label, count in counts.items())
     body = "".join(
-        "<tr>"
-        f"<td>{esc(row['symbol'])}</td>"
-        f"<td>{esc(row['date'])}</td>"
-        f"<td>{fmt(row.get('daily_return'), '{:.1%}')}</td>"
-        f"<td>{fmt(row.get('previous_close'), '{:.2f}')}</td>"
-        f"<td>{fmt(row.get('close'), '{:.2f}')}</td>"
-        f"<td>{fmt(row.get('next_close'), '{:.2f}')}</td>"
-        f"<td><span class='quality-label'>{esc(row['label'])}</span></td>"
-        f"<td>{esc(row['note'])}</td>"
+        f"<tr data-label='{esc(row['label'])}'>"
+        f"{sort_cell('symbol', row['symbol'], esc(row['symbol']))}"
+        f"{sort_cell('date', row['date'], esc(row['date']))}"
+        f"{sort_cell('return', row.get('daily_return'), fmt(row.get('daily_return'), '{:.1%}'), 'number')}"
+        f"{sort_cell('previous_close', row.get('previous_close'), fmt(row.get('previous_close'), '{:.2f}'), 'number')}"
+        f"{sort_cell('close', row.get('close'), fmt(row.get('close'), '{:.2f}'), 'number')}"
+        f"{sort_cell('next_close', row.get('next_close'), fmt(row.get('next_close'), '{:.2f}'), 'number')}"
+        f"{sort_cell('label', quality_label_rank(str(row['label'])), render_quality_label(str(row['label'])), 'number')}"
+        f"{sort_cell('note', row['note'], esc(row['note']))}"
         "</tr>"
         for row in rows
     )
     return (
         "<section class='quality-detail'><h2>Extreme Return Diagnostics</h2>"
-        "<table class='compact-table'><thead><tr><th>Symbol</th><th>Date</th><th>Return</th>"
-        "<th>Prev Close</th><th>Close</th><th>Next Close</th><th>Label</th><th>Note</th></tr></thead>"
+        f"<p class='status-note'>{len(rows)} extreme return events. {esc(count_text)}</p>"
+        "<div class='scanner-toolbar'>"
+        "<label for='quality-filter-label'>Label</label>"
+        f"<select id='quality-filter-label' data-table-filter data-filter-key='label'>{label_options}</select>"
+        f"<span class='muted' data-visible-count data-count-label='events'>{len(rows)} events shown</span>"
+        "</div>"
+        "<table class='compact-table' data-filter-table data-sort-table><thead><tr>"
+        f"{sort_header('Symbol', 'symbol', 'ascending')}"
+        f"{sort_header('Date', 'date', 'descending')}"
+        f"{sort_header('Return', 'return', 'descending')}"
+        f"{sort_header('Prev Close', 'previous_close', 'descending')}"
+        f"{sort_header('Close', 'close', 'descending')}"
+        f"{sort_header('Next Close', 'next_close', 'descending')}"
+        f"{sort_header('Label', 'label', 'ascending')}"
+        f"{sort_header('Note', 'note', 'ascending')}"
+        "</tr></thead>"
         f"<tbody>{body}</tbody></table></section>"
     )
+
+
+def render_quality_label_options(rows: list[dict]) -> str:
+    labels = {str(row.get("label") or "") for row in rows if row.get("label")}
+    ordered = sorted(labels, key=quality_label_rank)
+    options = ["<option value='all'>All labels</option>"]
+    options.extend(f"<option value='{esc(label)}'>{esc(label)}</option>" for label in ordered)
+    return "".join(options)
+
+
+def quality_label_counts(rows: list[dict]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for row in sorted(rows, key=lambda item: quality_label_rank(str(item.get("label") or ""))):
+        label = str(row.get("label") or "unknown")
+        counts[label] = counts.get(label, 0) + 1
+    return counts
+
+
+def quality_label_rank(label: str) -> int:
+    order = {
+        "missing_corporate_action": 0,
+        "possible_data_error": 1,
+        "corporate_action": 2,
+        "likely_real_move": 3,
+    }
+    return order.get(label, 99)
+
+
+def render_quality_label(label: str) -> str:
+    return f"<span class='quality-label {esc(label)}'>{esc(label)}</span>"
 
 
 def render_source_notice(sources: list[dict]) -> str:

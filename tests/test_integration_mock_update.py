@@ -129,6 +129,9 @@ def test_scanner_filter_markup_is_rendered():
     assert "data-filter-key='scanner'" in html
     assert "data-filter-key='sector'" in html
     assert "data-filter-key='industry'" in html
+    assert "data-filter-table" in html
+    assert "data-sort-table" in html
+    assert "data-visible-count data-count-label='hits'" in html
     assert "All sectors" in html
     assert "All industries" in html
     assert "data-scanner='Pullback MA10'" in html
@@ -156,6 +159,48 @@ def test_scanner_filter_markup_is_rendered():
     assert "data-sort-cell='perf_1w' data-sort-type='number' data-sort-value='0.02'" in html
     assert "data-sort-cell='avg_volume' data-sort-type='number' data-sort-value='1250000'" in html
     assert "1.2M" in html
+
+
+def test_extreme_return_diagnostics_are_filterable_and_sortable():
+    from trading_dashboard.render.html import render_extreme_return_events
+
+    html = render_extreme_return_events(
+        [
+            {
+                "symbol": "AAP",
+                "date": "2026-01-05",
+                "daily_return": 0.57,
+                "previous_close": 31.31,
+                "close": 49.17,
+                "next_close": 48.67,
+                "label": "likely_real_move",
+                "note": "No split-like ratio or one-day reversal pattern detected",
+            },
+            {
+                "symbol": "PRIM",
+                "date": "2026-01-06",
+                "daily_return": -0.501,
+                "previous_close": 202.92,
+                "close": 101.23,
+                "next_close": 107.98,
+                "label": "missing_corporate_action",
+                "note": "Close/previous close ratio resembles a common split ratio",
+            },
+        ]
+    )
+    assert "quality-filter-label" in html
+    assert "data-filter-key='label'" in html
+    assert "data-filter-table" in html
+    assert "data-sort-table" in html
+    assert "data-visible-count data-count-label='events'" in html
+    assert "missing_corporate_action: 1" in html
+    assert "likely_real_move: 1" in html
+    assert "class='quality-label missing_corporate_action'" in html
+    assert "<tr data-label='missing_corporate_action'>" in html
+    assert "<tr> data-label" not in html
+    assert html.index("missing_corporate_action") < html.index("likely_real_move")
+    assert "data-sort-key='return'" in html
+    assert "data-sort-cell='label' data-sort-type='number' data-sort-value='0'" in html
 
 
 def test_sector_heatmap_orders_by_weekly_returns_and_shows_two_periods():
