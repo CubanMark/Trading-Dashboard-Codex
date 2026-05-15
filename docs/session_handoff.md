@@ -1,8 +1,9 @@
 # Session Handoff - Trading Dashboard
 
-Stand: 2026-05-15, Update nach Extreme-Return-Diagnostik
+Stand: 2026-05-15, Update vor neuer Session
 Phase: 1 MVP
 Baseline-Commit: `e9e41bb Create phase 1 MVP baseline`
+Aktueller Remote: `https://github.com/CubanMark/Trading-Dashboard-Codex`
 
 ## Zweck dieser Datei
 
@@ -27,7 +28,7 @@ Letzte bekannte Verifikation:
 
 ```powershell
 python -m pytest -q -p no:cacheprovider
-# 24 passed
+# 25 passed
 ```
 
 Zusaetzliche lokale Verifikation:
@@ -37,8 +38,8 @@ $env:PYTHONPATH='src'; python -m trading_dashboard update --mock --years 2
 # erfolgreich; benoetigte wegen gesperrtem db/-Schreibzugriff eine einmalige Eskalation
 
 $env:PYTHONPATH='src'; python -m trading_dashboard update --years 1
-# erfolgreich mit yfinance; Dashboard-Datenstand 2026-05-13
-# letzter Lauf meldete ANF und BAC als fehlende yfinance-Downloads
+# erfolgreich mit yfinance; Dashboard-Datenstand 2026-05-14
+# letzter Lauf meldete NPO im Batch, Retry/Endstatus danach aber 1244/1244 geladen
 ```
 
 ## Dashboard-Status
@@ -52,6 +53,7 @@ Die Homepage zeigt derzeit:
 - Industry Leadership mit Top 10 und Bottom 10
 - Research Scanner Hits ueber die volle Breite
 - Run Status und Data Quality Log
+- Extreme Return Diagnostics mit Filter und Sortierung
 
 Die redundante `Dimension Snapshot`-Sektion wurde entfernt, weil sie inhaltlich fast identisch zum Market State war.
 
@@ -63,7 +65,7 @@ Neu gehaertet:
 - Compute loggt zusaetzlich Coverage fuer die tatsaechlich verwendeten Equity-Symbole und Mapping-Luecken fuer Sector/Industry.
 - Aktueller Mock-Lauf: 1244 aktive Equities, 1244 geladen, 1244 mit >= 220 Zeilen; 2 Industry-Mapping-Luecken (`PINS`, `ULS`).
 - yfinance-Daily-Fetch filtert den laufenden Kalendertag heraus, damit keine intraday/unfertigen Tagesbalken in ein EOD-Dashboard geraten. Das behob eine falsche `invalid_ohlc`-Warnung fuer 2026-05-14.
-- Aktueller yfinance-Lauf: Datenstand 2026-05-13, 1244 aktive Equities, 1244 geladen, 0 invalid OHLC, 0 nonpositive OHLC, 0 stale Symbols.
+- Aktueller yfinance-Lauf: Datenstand 2026-05-14, 1244 aktive Equities, 1244 geladen, 0 invalid OHLC, 0 nonpositive OHLC, 0 stale Symbols.
 - Manuelle Universe-Klassifikations-Overrides:
   - `ULS`: Commercial Services / Miscellaneous Commercial Services
   - `PINS`: Technology Services / Internet Software / Services
@@ -76,6 +78,7 @@ Neu gehaertet:
 - Scanner-Coverage wird geloggt: letzter echter Lauf 1150 Symbole gescannt, 93 per Industry ausgeschlossen, 75 Research Hits.
 - Breadth-Historie wird bei `compute` aus den gespeicherten Kursen neu aufgebaut und bei `render` auf `/breadth.html` als Tabelle der letzten 30 Handelstage angezeigt. Die Homepage nutzt dieselbe Historie fuer die Breadth-Sparkline.
 - `/breadth.html` trennt jetzt `Participation Breadth` und `Momentum Breadth`. Participation zeigt SMA50, SMA200, 52W Highs/Lows und Near-52W-High ohne redundanten `valid symbols`-Text in jeder KPI-Karte. Momentum zeigt die wichtigsten Market-Monitor-inspirierten Werte: 4% Up/Down taeglich, 5D- und 10D-Ratio daraus, 25% Up/Down ueber 3M sowie 50% Up/Down ueber 1M. Die Historientabelle enthaelt dieselben neuen Spalten.
+- KPI-Sparklines sind bewusst neutral dunkelgrau mit heller Flaeche; die Ampel-Interpretation steckt im oberen Kachelrand, nicht in der Linie.
 
 ## Scanner-Status
 
@@ -107,7 +110,7 @@ Aktive Pullback-Basisfilter:
 - RS-Rang mindestens 70
 - Schlusskurs maximal 30% unter 52W-Hoch
 
-Letzter lokaler Compute/Render nach Schaerfung: 62 Research Hits.
+Letzter lokaler Compute/Render nach Schaerfung: 62 Research Hits. Gegenueber vorher 75 Hits wurden 13 Symbole vor allem durch den neuen Mindestvolumenfilter entfernt.
 
 ## Wichtige Entscheidungen
 
@@ -118,6 +121,8 @@ Letzter lokaler Compute/Render nach Schaerfung: 62 Research Hits.
 - Sentiment/Fear & Greed und FRED/HY-OAS bleiben sichtbar als nicht verfuegbar, solange keine robuste Quelle konfiguriert ist.
 - Keine Auto-Composite-Ampel. Die Dimensionen bleiben separat interpretierbar.
 - Generierte HTML-Seiten und SQLite-Dateien sind bewusst nicht committed.
+- Repository heisst bewusst `Trading-Dashboard-Codex`, um es klar vom parallelen Claude-Projekt zu trennen.
+- Der Claude-Projektordner bleibt wieder tabu. Erlaubte Inspirationsquelle ist nur noch das bereits erstellte Review-Dokument `docs/parallel_project_review.md`.
 
 ## Datenstand und Universum
 
@@ -133,6 +138,7 @@ Hohe Prioritaet:
 
 - yfinance-Teilfehler treten tatsaechlich auf. Letzter Lauf meldete `NPO` im Batch als fehlend, der Retry/Endstatus zeigte danach aber 1244/1244 geladene Equities und `missing_symbols - ok`.
 - Extreme Tagesrenditen bleiben fachlich zu klaeren. Letzter yfinance-Lauf: 14 unexplained, 0 corporate-action-related; Diagnose-Tabelle nennt u.a. `AAP`, `APLS`, `ASGN`, `CORT`, `HTZ`, `PRIM`.
+- GitHub Pages/Actions muessen nach dem ersten Push noch geprueft werden: Workflow vorhanden, aber Pages-Deployment-Status noch nicht in dieser Session verifiziert.
 
 Mittlere Prioritaet:
 
@@ -142,20 +148,30 @@ Mittlere Prioritaet:
 
 ## Empfohlene naechste Schritte
 
-1. Extreme Tagesrenditen fachlich entscheiden:
+1. GitHub-Setup pruefen:
+   - auf GitHub Pages aktivieren bzw. Workflow-Lauf kontrollieren
+   - pruefen, ob die erzeugten statischen Seiten wie erwartet deployed werden
+   - danach entscheiden, ob DB/HTML im Workflow erzeugt oder lokal erzeugte Artefakte bewusst ausgeschlossen bleiben
+
+2. Extreme Tagesrenditen fachlich entscheiden:
    - `missing_corporate_action`-Faelle aus `extreme_return_events` gegen Splits/Corporate Actions pruefen
    - entscheiden, ob man manuelle Corporate-Action-Overrides pflegt oder zunaechst nur sichtbar warnt
    - keine Adjusted-Werte heimlich einmischen; Phase-1-Entscheidung bleibt unadjusted + Corporate Actions separat
 
-2. yfinance-Fehlermeldungen behandeln:
-   - `ANF` und `BAC` gegen erneuten Lauf/Einzelticker-Fetch pruefen
+3. yfinance-Fehlermeldungen behandeln:
+   - `NPO` gegen erneuten Lauf/Einzelticker-Fetch pruefen
    - entscheiden, ob fehlende Symbole retrybar, temporär oder aus dem Universum zu entfernen sind
 
-3. Universe-Workflow stabilisieren:
+4. Universe-Workflow stabilisieren:
    - Liquiditaetsfilter dokumentieren
    - Anzahl verwendeter Werte in Breadth und Scanner noch prominenter machen
 
-4. Danach weitere Detailseiten ausbauen:
+5. Pullback-Scanner fachlich finalisieren:
+   - Regeln in `docs/pullback_scanner_rules.md` gegen echte Chartbeispiele validieren
+   - entscheiden, ob die Volumenuntergrenze von 750.000 Aktien als Phase-1-Standard bleibt
+   - weiterhin klar als Research-Scanner kennzeichnen, nicht als handelbarer Edge
+
+6. Danach weitere Detailseiten ausbauen:
    - Risk-On/Off-Verlauf
    - Volatility mit VIX/VIX3M-Kontext
    - Credit/Macro-Fallback sauberer darstellen
@@ -188,10 +204,26 @@ python -m trading_dashboard render
 
 ## Git-Hinweis
 
-Die Baseline ist committed. Nach dieser Handoff-Datei ist der naechste sinnvolle kleine Commit:
+Aktueller Remote:
 
 ```text
-Add session handoff status document
+origin -> https://github.com/CubanMark/Trading-Dashboard-Codex.git
+```
+
+Letzte relevante Commits:
+
+```text
+7f185ff Improve extreme return review table
+9e0f35b Persist extreme return diagnostics
+ba01dd2 Add momentum breadth KPIs
+6b2fae5 Sharpen pullback scanner rules
+ee00e8d Add breadth history
+```
+
+Nach dieser Handoff-Datei ist der naechste sinnvolle kleine Commit:
+
+```text
+Update session handoff
 ```
 
 Vor dem Commit pruefen:
