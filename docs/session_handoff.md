@@ -1,107 +1,89 @@
 # Session Handoff - Trading Dashboard
 
-Stand: 2026-05-15, Update vor neuer Session
+Stand: 2026-05-16, Tagesabschluss
 Phase: 1 MVP
-Baseline-Commit: `e9e41bb Create phase 1 MVP baseline`
-Aktueller Remote: `https://github.com/CubanMark/Trading-Dashboard-Codex`
+Remote: `https://github.com/CubanMark/Trading-Dashboard-Codex`
+Aktueller Branch: `main`
 
-## Zweck dieser Datei
+## Wiedereinstieg
 
-Diese Datei ist der kompakte Wiedereinstiegspunkt fuer eine neue Codex-Session. Vor jeder neuen Aufgabe weiterhin `PROJECT_BRIEF.md` lesen. Der Ordner `G:\Meine Ablage\05_Projekte\Trading\04_Trading-Dashboard-Claude` bleibt tabu.
+Vor jeder neuen Aufgabe weiterhin `PROJECT_BRIEF.md` lesen.
 
-## Aktueller Projektstand
+Der Ordner `G:\Meine Ablage\05_Projekte\Trading\04_Trading-Dashboard-Claude` bleibt tabu, sofern Markus ihn nicht erneut explizit freigibt. Das Claude-Parallelprojekt wird nicht weiter fortgefuehrt; relevante Erkenntnisse wurden bereits in dieses Projekt uebernommen oder dokumentiert.
 
-Das Projekt hat eine funktionierende Phase-1-MVP-Basis:
+## Aktueller Stand
+
+Das Projekt ist ein funktionierendes Phase-1-End-of-Day-Dashboard:
 
 - Python-Package unter `src/trading_dashboard/`
-- CLI mit `python -m trading_dashboard init-db|fetch|compute|render|update`
-- SQLite-Schema fuer Preise, Symbole, Corporate Actions, Marktmetriken, Sektor-/Industry-Returns, Scanner-Hits, Run-Log und Data-Quality-Checks
-- yfinance-Fetch mit unadjusted OHLCV und separaten Corporate Actions
+- CLI: `python -m trading_dashboard init-db|fetch|compute|render|update`
+- SQLite fuer Preise, Corporate Actions, Sentiment, Breadth, Marktdimensionen, Sektor-/Industry-Returns, Scanner-Hits, Run-Log und Data-Quality-Checks
+- yfinance als Preisquelle mit unadjusted OHLCV und separaten Corporate Actions
+- CNN Fear & Greed als optionale Sentimentquelle
 - deterministischer Mock-Modus fuer Tests und Offline-Laeufe
 - statische HTML-Seiten unter `pages/`
-- GitHub-Actions-Workflow fuer Pages-Build
-- Tests fuer Indikatoren, Storage, Universe-Loader, Pullback-Scanner, Fetch-Replacement und Mock-Integration
-- persistierte Breadth-Historie in `breadth_daily` mit SMA50/SMA200, 52W Highs/Lows, Coverage und Momentum-Breadth-Zaehlungen
-- persistierte Extreme-Return-Diagnostik in `extreme_return_events`
+- GitHub-Actions-Workflow fuer Daily Build und GitHub Pages
+- DB-Cache im GitHub-Actions-Workflow
+- S&P-1500-nahe Universe-Datei unter `inputs/universe/sp1500_universe_filtered.csv`
 
-Letzte bekannte Verifikation:
+## Neue wichtige Aenderungen
 
-```powershell
-python -m pytest -q -p no:cacheprovider
-# 25 passed
-```
+### Inkrementeller yfinance-Fetch
 
-Zusaetzliche lokale Verifikation:
+Der yfinance-Fetch ist jetzt inkrementell:
 
-```powershell
-$env:PYTHONPATH='src'; python -m trading_dashboard update --mock --years 2
-# erfolgreich; benoetigte wegen gesperrtem db/-Schreibzugriff eine einmalige Eskalation
+- vorhandene `yfinance`-Historie pro Symbol wird erkannt
+- bestehende Symbole laden nur ab `letztes yfinance-Datum - 10 Tage`
+- neue Symbole oder Symbole mit bisher nur Mock-Historie bekommen weiterhin einen Full-Fetch ueber `--years`
+- echte yfinance-Daten werden per Upsert gespeichert
+- alte Mock-Historie wird beim ersten echten yfinance-Fetch symbolweise ersetzt
+- bei yfinance-Ausfall und vorhandener DB-Historie wird die bestehende Historie behalten; es wird nicht mehr automatisch alles mit Mock-Daten ueberschrieben
+- Data-Quality-Pruefung laeuft nach dem Upsert gegen den vollstaendigen gespeicherten Datenbestand, nicht nur gegen das kurze Nachladefenster
 
-$env:PYTHONPATH='src'; python -m trading_dashboard update --years 1
-# erfolgreich mit yfinance; Dashboard-Datenstand 2026-05-14
-# letzter Lauf meldete NPO im Batch, Retry/Endstatus danach aber 1244/1244 geladen
-```
+Relevante Dateien:
 
-## Dashboard-Status
+- `src/trading_dashboard/data/fetch.py`
+- `src/trading_dashboard/data/storage.py`
+- `tests/test_fetch_replaces_sources.py`
 
-Die Homepage zeigt derzeit:
+### Breadth Composite und Regime
 
-- Index-Strip fuer SPY, QQQ, IWM, VIX/TLT-Kontext mit kleinen Sparklines
-- Market-State-Pills fuer sechs Dimensionen
-- Breadth-Pill mit Historien-Sparkline und Kontext zu SMA200 sowie 52W Highs/Lows
-- kompakte Sektor-Heatmap fuer 1W und 1M
-- Industry Leadership mit Top 10 und Bottom 10
-- Research Scanner Hits ueber die volle Breite
-- Run Status und Data Quality Log
-- Extreme Return Diagnostics mit Filter und Sortierung
+Die Breadth-Seite hat jetzt:
 
-Die redundante `Dimension Snapshot`-Sektion wurde entfernt, weil sie inhaltlich fast identisch zum Market State war.
+- Breadth-KPIs fuer Participation und Momentum
+- Heatmap-Historie mit Year-Selector
+- Composite-Spalte in der Historie
+- Composite-Gauge
+- `SPY vs Breadth Composite` Chart mit YTD/1Y/3Y/5Y
+- 5D-Composite-Linie und rote Baender fuer 3+ negative Tages-Composite-Tage
+- Regime-Label direkt in der Composite-Box
 
-Neu gehaertet:
+Aktuelle Regime:
 
-- Mock- und yfinance-Fetches laufen durch dieselbe Data-Quality-Pruefung.
-- Dashboard zeigt bei `mock` und `mock-fallback` eine prominente Source-Warnung.
-- Data-Quality-Log umfasst jetzt Missing Symbols mit Beispielen, stale Symbols mit Beispielen, nonpositive OHLC, unplausible OHLC-Beziehungen, extreme Tagesrenditen und Universe Coverage.
-- Compute loggt zusaetzlich Coverage fuer die tatsaechlich verwendeten Equity-Symbole und Mapping-Luecken fuer Sector/Industry.
-- Aktueller Mock-Lauf: 1244 aktive Equities, 1244 geladen, 1244 mit >= 220 Zeilen; 2 Industry-Mapping-Luecken (`PINS`, `ULS`).
-- yfinance-Daily-Fetch filtert den laufenden Kalendertag heraus, damit keine intraday/unfertigen Tagesbalken in ein EOD-Dashboard geraten. Das behob eine falsche `invalid_ohlc`-Warnung fuer 2026-05-14.
-- Aktueller yfinance-Lauf: Datenstand 2026-05-14, 1244 aktive Equities, 1244 geladen, 0 invalid OHLC, 0 nonpositive OHLC, 0 stale Symbols.
-- Manuelle Universe-Klassifikations-Overrides:
-  - `ULS`: Commercial Services / Miscellaneous Commercial Services
-  - `PINS`: Technology Services / Internet Software / Services
-  Nach Recompute/Render: `symbol_mapping_coverage` ist `ok` mit 0 fehlenden Sector/Industry-Werten.
-- EOD-Cutoff nutzt New-York-Zeit: vor 17:30 ET wird der aktuelle Tagesbalken entfernt, nach 17:30 ET bleibt er erlaubt.
-- Dashboard-Topbar zeigt eine kompakte Betriebszeile: Quelle, letztes Daten-Datum, Equity-Coverage, OHLC-Status und Return-Warnungen.
-- Extreme Tagesrenditen werden getrennt geloggt als `corporate_action_returns` und `extreme_daily_returns`.
-- Extreme Tagesrenditen werden zusaetzlich in `extreme_return_events` gespeichert und auf der Homepage unter `Extreme Return Diagnostics` angezeigt: Symbol, Datum, Return, vorheriger Schlusskurs, Schlusskurs, naechster Schlusskurs, Label und Diagnosehinweis.
-- Aktueller yfinance-Lauf vom 2026-05-15: Datenstand 2026-05-14, 1244/1244 Equities, 0 Missing Symbols nach Retry, 14 extreme Returns; davon 4 `missing_corporate_action`, 10 `likely_real_move`, 0 `possible_data_error`.
-- Scanner-Coverage wird geloggt: letzter echter Lauf 1150 Symbole gescannt, 93 per Industry ausgeschlossen, 75 Research Hits.
-- Breadth-Historie wird bei `compute` aus den gespeicherten Kursen neu aufgebaut und bei `render` auf `/breadth.html` als Tabelle der letzten 30 Handelstage angezeigt. Die Homepage nutzt dieselbe Historie fuer die Breadth-Sparkline.
-- `/breadth.html` trennt jetzt `Participation Breadth` und `Momentum Breadth`. Participation zeigt SMA50, SMA200, 52W Highs/Lows und Near-52W-High ohne redundanten `valid symbols`-Text in jeder KPI-Karte. Momentum zeigt die wichtigsten Market-Monitor-inspirierten Werte: 4% Up/Down taeglich, 5D- und 10D-Ratio daraus, 25% Up/Down ueber 3M sowie 50% Up/Down ueber 1M. Die Historientabelle enthaelt dieselben neuen Spalten.
-- KPI-Sparklines sind bewusst neutral dunkelgrau mit heller Flaeche; die Ampel-Interpretation steckt im oberen Kachelrand, nicht in der Linie.
+- `Damaged`: 5D-Composite < 0 oder mindestens 3 Tage in Folge Composite < 0
+- `Healing`: 1 bis 10 Handelstage nach Ende von Damaged, sofern 5D-Composite wieder > 0
+- `Weakening`: 5D-Composite > 0, aber ueber 5 Handelstage um mindestens 4 Punkte gefallen
+- `Positive`: 5D-Composite > 3
+- `Other`: kein klares Regime
 
-## Scanner-Status
+Research-Ergebnis aus Swing Lab:
 
-Der Pullback-Research-Scanner ist als Watchlist-/Research-Ausgabe umgesetzt, nicht als akzeptierter handelbarer Edge.
+- `Healing` ist der robusteste positive Befund fuer Pullback-Kontext.
+- `Weakening` ist ein Vorsichtssignal, kein Verkaufssignal.
+- `Damaged` ist kein blindes Kaufsignal; SPY-Trendkontext ist wichtig.
+- Filter B wurde im Holdout verworfen.
 
-Die fachlichen Regeln sind dokumentiert in `docs/pullback_scanner_rules.md`.
+Relevante Dateien:
 
-Aktuelle Varianten:
+- `docs/breadth_composite_research.md`
+- `src/trading_dashboard/render/html.py`
+- `tests/test_integration_mock_update.py`
 
-- `3D Pullback`
-- `Pullback MA10`
-- `Pullback MA20`
+### Scanner
 
-Scanner-Tabelle:
+Der Pullback-Research-Scanner bleibt ausdruecklich ein Research-/Watchlist-Werkzeug, kein akzeptierter Trading Edge.
 
-- sortierbar nach Setup, Ticker, Sector, Industry, Relative Strength, 1W, 1M, MA Distance, ATR, 52W Distance und Also In
-- zeigt jetzt auch das durchschnittliche 50-Tage-Volumen (`Avg Vol`)
-- Setup wird als farbiger Chip angezeigt
-- Trigger-Hinweis erscheint im Hover-Tooltip des Setup-Chips
-- `Also In` zeigt Ueberschneidungen als farbige Chips
-- Filter fuer Setup, Sector und Industry sind gekoppelt: die Dropdown-Optionen reagieren auf die jeweils aktiven anderen Filter
-
-Aktive Pullback-Basisfilter:
+Aktuelle Regeln:
 
 - SPY ueber SMA200
 - Aktie ueber SMA50, SMA50 ueber SMA200
@@ -109,79 +91,114 @@ Aktive Pullback-Basisfilter:
 - durchschnittliches 50-Tage-Volumen mindestens 750.000 Aktien
 - RS-Rang mindestens 70
 - Schlusskurs maximal 30% unter 52W-Hoch
+- MA10/MA20-Pullbacks verwenden ATR-normalisierte Distanz: maximal `0.75 * ATR14` vom jeweiligen SMA
+- Symbole mit `missing_corporate_action` oder `possible_data_error` werden aus dem Scanner ausgeschlossen
 
-Letzter lokaler Compute/Render nach Schaerfung: 62 Research Hits. Gegenueber vorher 75 Hits wurden 13 Symbole vor allem durch den neuen Mindestvolumenfilter entfernt.
+Scanner-Tabelle:
 
-## Wichtige Entscheidungen
+- Setup, Ticker, Sector, Industry
+- RS, 1W, 1M
+- `MA ATR`
+- ATR%
+- Avg Volume
+- 52W Distance
+- Overlap-Chips in `Also In`
+- gekoppelte Filter fuer Setup/Sector/Industry
 
-- Keine Imports aus Swing Lab oder anderen Trading-Projekten.
-- Keine gemeinsame `shared/`-Library in Phase 1.
-- Rohpreise werden als unadjusted OHLCV gespeichert; Corporate Actions separat.
-- Fehlende optionale Quellen duerfen keine erfundenen Werte erzeugen.
-- Sentiment/Fear & Greed und FRED/HY-OAS bleiben sichtbar als nicht verfuegbar, solange keine robuste Quelle konfiguriert ist.
-- Keine Auto-Composite-Ampel. Die Dimensionen bleiben separat interpretierbar.
-- Generierte HTML-Seiten und SQLite-Dateien sind bewusst nicht committed.
-- Repository heisst bewusst `Trading-Dashboard-Codex`, um es klar vom parallelen Claude-Projekt zu trennen.
-- Der Claude-Projektordner bleibt wieder tabu. Erlaubte Inspirationsquelle ist nur noch das bereits erstellte Review-Dokument `docs/parallel_project_review.md`.
+Regeln dokumentiert in `docs/pullback_scanner_rules.md`.
 
-## Datenstand und Universum
+### Neue Detailseiten
 
-Aktuell existiert eine gefilterte Universe-Datei:
+Neben Breadth existieren jetzt echte Minimal-Detailseiten:
 
-`inputs/universe/sp1500_universe_filtered.csv`
+- `sentiment.html`: CNN Fear & Greed
+- `risk.html`: XLY/XLP
+- `volatility.html`: VIX und VIX/VIX3M-Kontext
+- `credit-macro.html`: TLT/HYG/LQD als Proxy, HY OAS noch nicht angebunden
+- `sectors.html`
+- `scanners.html`
 
-Zielbild ist nicht ein kleines Testuniversum, sondern die 1.500 liquidesten Aktien bzw. ein S&P-1500-naher Workflow mit Liquiditaetsfilter. Die aktuelle Datei ist Teil der Baseline, aber die Datenqualitaets- und Universe-Checks muessen als naechster Schwerpunkt gehaertet werden.
+## Letzte Verifikation
+
+Zuletzt erfolgreich:
+
+```powershell
+python -m pytest tests/test_fetch_replaces_sources.py tests/test_storage.py -q -p no:cacheprovider
+# 9 passed
+
+python -m pytest -q -p no:cacheprovider
+# 34 passed
+
+python -m trading_dashboard compute
+# erfolgreich
+
+python -m trading_dashboard render
+# erfolgreich
+```
+
+Ein echter Live-`update --years 5` gegen yfinance wurde nach der inkrementellen Umstellung bewusst nicht mehr gestartet, um keinen unnoetigen Provider-/Rate-Limit-Lauf am Tagesende auszuloesen. Code-seitig gilt `--years 5` jetzt nur noch fuer Bootstrap-Symbole ohne vorhandene yfinance-Historie; bestehende Symbole laden inkrementell.
+
+## Git-Status zum Tagesabschluss
+
+Bekannte lokale Aenderungen:
+
+- `docs/breadth_composite_research.md`
+- `src/trading_dashboard/data/fetch.py`
+- `src/trading_dashboard/data/storage.py`
+- `src/trading_dashboard/render/html.py`
+- `tests/test_fetch_replaces_sources.py`
+- `tests/test_integration_mock_update.py`
+- `docs/session_handoff.md`
+
+Untracked:
+
+- `.claude/settings.local.json`
+
+Empfehlung: `.claude/` nicht committen. Das ist lokale Claude-Konfiguration mit breiten lokalen Berechtigungen.
 
 ## Offene Risiken
 
 Hohe Prioritaet:
 
-- yfinance-Teilfehler treten tatsaechlich auf. Letzter Lauf meldete `NPO` im Batch als fehlend, der Retry/Endstatus zeigte danach aber 1244/1244 geladene Equities und `missing_symbols - ok`.
-- Extreme Tagesrenditen bleiben fachlich zu klaeren. Letzter yfinance-Lauf: 14 unexplained, 0 corporate-action-related; Diagnose-Tabelle nennt u.a. `AAP`, `APLS`, `ASGN`, `CORT`, `HTZ`, `PRIM`.
-- GitHub Pages/Actions muessen nach dem ersten Push noch geprueft werden: Workflow vorhanden, aber Pages-Deployment-Status noch nicht in dieser Session verifiziert.
+- GitHub Pages/Actions live verifizieren: Workflow ist vorhanden, DB-Cache ist eingebaut, aber der aktuelle Live-Run/Pages-Status muss noch in GitHub geprueft werden.
+- Ersten echten Daily-Run mit inkrementellem Fetch beobachten: besonders Anzahl geladener Zeilen, `incremental_fetch`-Quality-Log, missing/stale symbols und Pages-Output.
+- Extreme-Return-Diagnostik fachlich weiter beobachten; `missing_corporate_action` und `possible_data_error` bleiben Scanner-Ausschlussgruende.
 
 Mittlere Prioritaet:
 
-- Detailseiten sind noch minimal; Breadth hat jetzt den ersten echten Historien-Drilldown, die uebrigen Dimensionen brauchen noch Verlauf/Kontext.
-- Industry Leadership ist nuetzlich, aber noch keine echte RRG-/Leadership-Analyse.
-- Pullback-Regeln sollten fachlich final dokumentiert werden.
+- HY OAS/FRED noch nicht angebunden; Credit-Seite nutzt HYG/LQD/TLT als Proxy.
+- Breadth-Research nutzt aktuelles Universum und enthaelt Survivorship Bias.
+- `new_highs_52w`-Abweichung zwischen Dashboard und Swing-Lab-Research klaeren: wahrscheinlich Lookback-/Randbehandlung.
+- Detailseiten sind brauchbare MVP-Seiten, aber noch kein voller fachlicher Drilldown.
+- Sektor-Heatmap hat noch keinen Zeitraum-Toggle.
 
 ## Empfohlene naechste Schritte
 
-1. GitHub-Setup pruefen:
-   - auf GitHub Pages aktivieren bzw. Workflow-Lauf kontrollieren
-   - pruefen, ob die erzeugten statischen Seiten wie erwartet deployed werden
-   - danach entscheiden, ob DB/HTML im Workflow erzeugt oder lokal erzeugte Artefakte bewusst ausgeschlossen bleiben
+1. GitHub Actions/Pages pruefen:
+   - letzten Workflow-Lauf anschauen
+   - Pages-URL oeffnen
+   - DB-Cache-Verhalten im zweiten Run kontrollieren
 
-2. Extreme Tagesrenditen fachlich entscheiden:
-   - `missing_corporate_action`-Faelle aus `extreme_return_events` gegen Splits/Corporate Actions pruefen
-   - entscheiden, ob man manuelle Corporate-Action-Overrides pflegt oder zunaechst nur sichtbar warnt
-   - keine Adjusted-Werte heimlich einmischen; Phase-1-Entscheidung bleibt unadjusted + Corporate Actions separat
+2. Einen echten inkrementellen Update-Lauf kontrolliert ausfuehren:
+   - `python -m trading_dashboard update --years 5`
+   - danach Data-Quality-Log und `incremental_fetch` pruefen
+   - sicherstellen, dass keine Mock-Historie in yfinance-Historie stehen bleibt
 
-3. yfinance-Fehlermeldungen behandeln:
-   - `NPO` gegen erneuten Lauf/Einzelticker-Fetch pruefen
-   - entscheiden, ob fehlende Symbole retrybar, temporär oder aus dem Universum zu entfernen sind
+3. Pipeline-Dokumentation aktualisieren:
+   - README um inkrementelles Fetch-Verhalten erweitern
+   - ggf. kurze Notiz zu GitHub-Actions-Betrieb und DB-Cache
 
-4. Universe-Workflow stabilisieren:
-   - Liquiditaetsfilter dokumentieren
-   - Anzahl verwendeter Werte in Breadth und Scanner noch prominenter machen
-
-5. Pullback-Scanner fachlich finalisieren:
-   - Regeln in `docs/pullback_scanner_rules.md` gegen echte Chartbeispiele validieren
-   - entscheiden, ob die Volumenuntergrenze von 750.000 Aktien als Phase-1-Standard bleibt
-   - weiterhin klar als Research-Scanner kennzeichnen, nicht als handelbarer Edge
-
-6. Danach weitere Detailseiten ausbauen:
-   - Risk-On/Off-Verlauf
-   - Volatility mit VIX/VIX3M-Kontext
-   - Credit/Macro-Fallback sauberer darstellen
+4. Danach fachlich:
+   - SPY-Trendkontext fuer Breadth-Regime in der UI sichtbarer machen
+   - HY OAS/FRED optional anbinden
+   - Sektor-Heatmap-Zeitraeume pruefen
 
 ## Lokale Befehle
 
 Tests:
 
 ```powershell
-$env:PYTHONPATH='src'; python -m pytest -q -p no:cacheprovider
+python -m pytest -q -p no:cacheprovider
 ```
 
 Mock-Update:
@@ -193,40 +210,17 @@ python -m trading_dashboard update --mock --years 2
 Echte Daten aktualisieren:
 
 ```powershell
-python -m trading_dashboard update --years 1
+python -m trading_dashboard update --years 5
 ```
 
-Nur rendern:
+Nur berechnen/rendern:
 
 ```powershell
+python -m trading_dashboard compute
 python -m trading_dashboard render
 ```
 
-## Git-Hinweis
-
-Aktueller Remote:
-
-```text
-origin -> https://github.com/CubanMark/Trading-Dashboard-Codex.git
-```
-
-Letzte relevante Commits:
-
-```text
-7f185ff Improve extreme return review table
-9e0f35b Persist extreme return diagnostics
-ba01dd2 Add momentum breadth KPIs
-6b2fae5 Sharpen pullback scanner rules
-ee00e8d Add breadth history
-```
-
-Nach dieser Handoff-Datei ist der naechste sinnvolle kleine Commit:
-
-```text
-Update session handoff
-```
-
-Vor dem Commit pruefen:
+Status:
 
 ```powershell
 git status --short

@@ -1,6 +1,6 @@
 # Pullback Scanner Rules
 
-Stand: 2026-05-14
+Stand: 2026-05-16
 Phase: 1 MVP
 
 ## Ziel
@@ -34,6 +34,7 @@ Eine Aktie muss alle Basisfilter erfuellen:
 - Relative-Strength-Rang mindestens 70, berechnet aus 1M-Performance innerhalb des aktiven Equity-Universums
 - Schlusskurs oberhalb SMA50, SMA50 oberhalb SMA200
 - Schlusskurs nicht mehr als 30% unter dem 52W-Hoch
+- keine offene Data-Quality-Flagge `missing_corporate_action` oder `possible_data_error`
 
 Diese Filter sind bewusst konservativ, aber noch nicht als finaler Edge-Filter zu verstehen.
 
@@ -54,9 +55,8 @@ Die Scanner-Tabelle zeigt:
 - Setup, Ticker, Sector, Industry
 - RS-Rang
 - 1W- und 1M-Performance
-- MA-Distanz
+- MA-Distanz in ATR-Einheiten (`MA ATR`)
 - ATR%
-- Distanz zum passenden MA in ATR-Einheiten
 - durchschnittliches 50-Tage-Volumen
 - Distanz zum 52W-Hoch
 - Ueberschneidungen mit anderen Varianten

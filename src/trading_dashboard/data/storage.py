@@ -300,6 +300,30 @@ def upsert_prices(db_path: Path, prices: pd.DataFrame, source: str) -> None:
         )
 
 
+def latest_price_dates(db_path: Path, symbols: Iterable[str], source: str | None = None) -> dict[str, str]:
+    symbol_list = list(symbols)
+    if not symbol_list:
+        return {}
+    marks = ",".join(["?"] * len(symbol_list))
+    params = list(symbol_list)
+    source_filter = ""
+    if source:
+        source_filter = " AND source = ?"
+        params.append(source)
+    with connect(db_path) as conn:
+        rows = conn.execute(
+            f"SELECT symbol, MAX(date) AS max_date FROM prices WHERE symbol IN ({marks}){source_filter} GROUP BY symbol",
+            params,
+        ).fetchall()
+    return {str(row["symbol"]): str(row["max_date"]) for row in rows if row["max_date"]}
+
+
+def has_price_history(db_path: Path) -> bool:
+    with connect(db_path) as conn:
+        row = conn.execute("SELECT 1 FROM prices LIMIT 1").fetchone()
+    return row is not None
+
+
 def replace_prices(db_path: Path, prices: pd.DataFrame, source: str, symbols: Iterable[str]) -> None:
     symbol_list = list(symbols)
     if not symbol_list:
@@ -385,6 +409,19 @@ def read_sentiment_rows(db_path: Path) -> list[dict]:
     with connect(db_path) as conn:
         rows = conn.execute("SELECT date, score, rating FROM sentiment_daily ORDER BY date").fetchall()
     return [dict(row) for row in rows]
+
+
+def read_actions(db_path: Path, symbols: list[str] | None = None) -> pd.DataFrame:
+    sql = "SELECT symbol, date, action_type, value FROM corporate_actions"
+    params: list[str] = []
+    if symbols:
+        marks = ",".join(["?"] * len(symbols))
+        sql += f" WHERE symbol IN ({marks})"
+        params = symbols
+    sql += " ORDER BY symbol, date, action_type"
+    with connect(db_path) as conn:
+        frame = pd.read_sql_query(sql, conn, params=params, parse_dates=["date"])
+    return frame
 
 
 def read_prices(db_path: Path, symbols: list[str] | None = None) -> pd.DataFrame:

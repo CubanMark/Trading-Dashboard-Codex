@@ -5,7 +5,7 @@ Phase-1-MVP fuer ein persoenliches End-of-Day Trading Dashboard fuer US-Maerkte.
 ## Was Phase 1 liefert
 
 - SQLite-Historie fuer Preise, Corporate Actions, Marktdimensionen, Sektor-Returns und Scanner-Hits.
-- Datenpipeline mit yfinance als primaerer Quelle und Mock-Modus fuer Tests/offline Builds.
+- Datenpipeline mit yfinance als primaerer Quelle, inkrementellem Nachladen und Mock-Modus fuer Tests/offline Builds.
 - Statisches HTML-Dashboard unter `pages/index.html`.
 - Minimale Drilldown-Seiten fuer Breadth, Sentiment, Risk, Credit/Macro, Volatility, Sectors und Scanners.
 - Pullback-v2a als Research-/Watchlist-Scanner, ausdruecklich nicht als akzeptierter Trading Edge.
@@ -36,7 +36,7 @@ python -m trading_dashboard update --mock
 python -m trading_dashboard update --years 5
 ```
 
-Ohne `--mock` nutzt die Pipeline yfinance, falls das Paket installiert ist und Netzwerk verfuegbar ist.
+Ohne `--mock` nutzt die Pipeline yfinance, falls das Paket installiert ist und Netzwerk verfuegbar ist. Bestehende yfinance-Historie wird inkrementell aktualisiert: vorhandene Symbole laden nur ein kurzes Ueberlappungsfenster nach, neue Symbole bekommen den vollen `--years`-Bootstrap. Bei Provider-Ausfall bleibt vorhandene Historie erhalten, statt automatisch durch Mock-Daten ersetzt zu werden.
 
 ## Wichtige fachliche Grenzen
 

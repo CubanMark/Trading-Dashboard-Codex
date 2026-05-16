@@ -60,6 +60,8 @@ def test_mock_update_creates_db_and_html():
     assert "Breadth Composite" in breadth_html
     assert "composite-bar" in breadth_html
     assert "composite-score" in breadth_html
+    assert "regime-pill" in breadth_html
+    assert "composite-readout" in breadth_html
     assert "SPY vs Breadth Composite" in breadth_html
     assert "data-breadth-chart" in breadth_html
     assert "SPY indexed to 100" in breadth_html
@@ -246,6 +248,93 @@ def test_breadth_composite_scores_heatmap_states():
 
     assert breadth_composite_score(strong_positive) == 18
     assert breadth_composite_score(strong_negative) == -18
+
+
+def test_breadth_composite_regime_annotation_identifies_healing_and_weakening():
+    from trading_dashboard.render.html import annotate_breadth_regimes
+
+    def row(date: str, score_shape: str) -> dict:
+        if score_shape == "positive":
+            return {
+                "date": date,
+                "pct_above_sma50": 70,
+                "pct_above_sma200": 70,
+                "new_highs_52w": 40,
+                "new_lows_52w": 10,
+                "pct_within_5pct_52w_high": 40,
+                "up_4pct": 40,
+                "down_4pct": 10,
+                "ratio_4pct_5d": 2.0,
+                "ratio_4pct_10d": 2.0,
+                "up_25pct_3m": 200,
+                "down_25pct_3m": 50,
+                "up_50pct_1m": 0,
+                "down_50pct_1m": 30,
+            }
+        if score_shape == "negative":
+            return {
+                "date": date,
+                "pct_above_sma50": 20,
+                "pct_above_sma200": 20,
+                "new_highs_52w": 10,
+                "new_lows_52w": 40,
+                "pct_within_5pct_52w_high": 5,
+                "up_4pct": 10,
+                "down_4pct": 40,
+                "ratio_4pct_5d": 0.3,
+                "ratio_4pct_10d": 0.3,
+                "up_25pct_3m": 50,
+                "down_25pct_3m": 200,
+                "up_50pct_1m": 30,
+                "down_50pct_1m": 0,
+            }
+        return {
+            "date": date,
+            "pct_above_sma50": 50,
+            "pct_above_sma200": 50,
+            "new_highs_52w": 10,
+            "new_lows_52w": 10,
+            "pct_within_5pct_52w_high": 24,
+            "up_4pct": 10,
+            "down_4pct": 10,
+            "ratio_4pct_5d": 1.0,
+            "ratio_4pct_10d": 1.0,
+            "up_25pct_3m": 100,
+            "down_25pct_3m": 100,
+            "up_50pct_1m": 0,
+            "down_50pct_1m": 0,
+        }
+
+    healing_rows = [
+        row("2026-01-01", "negative"),
+        row("2026-01-02", "negative"),
+        row("2026-01-03", "negative"),
+        row("2026-01-04", "positive"),
+        row("2026-01-05", "positive"),
+        row("2026-01-06", "positive"),
+        row("2026-01-07", "positive"),
+        row("2026-01-08", "positive"),
+    ]
+    weakening_rows = [
+        row("2026-02-01", "positive"),
+        row("2026-02-02", "positive"),
+        row("2026-02-03", "positive"),
+        row("2026-02-04", "positive"),
+        row("2026-02-05", "positive"),
+        row("2026-02-06", "positive"),
+        row("2026-02-07", "neutral"),
+        row("2026-02-08", "neutral"),
+        row("2026-01-09", "neutral"),
+        row("2026-01-10", "neutral"),
+        row("2026-01-11", "neutral"),
+    ]
+
+    healing = annotate_breadth_regimes(healing_rows)
+    weakening = annotate_breadth_regimes(weakening_rows)
+
+    assert healing[2]["composite_regime"] == "Damaged"
+    assert healing[-1]["composite_regime"] == "Healing"
+    assert weakening[7]["composite_regime"] == "Weakening"
 
 
 def test_extreme_return_diagnostics_are_filterable_and_sortable():

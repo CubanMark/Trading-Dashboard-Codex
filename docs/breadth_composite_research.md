@@ -1,16 +1,49 @@
 # Breadth Composite Research Note
 
-Stand: 2026-05-15
+Stand: 2026-05-16
 
 Diese Notiz haelt die erste fachliche Interpretation des internen Breadth Composite fest. Wichtig: Das ist kein globaler Dashboard-Composite und keine automatische Marktampel. Der Wert aggregiert nur die neun Breadth-History-Farbzustaende auf der Breadth-Detailseite.
 
 ## Datenbasis
 
-- Zeitraum der aktuell aufgebauten Historie: 2021-02-24 bis 2026-05-14.
-- Umfang: 1312 Handelstage.
-- Datenquelle: eigenes Dashboard-Universum aus der lokalen SQLite-Datenbank, nicht Stockbee direkt.
+- Dashboard-Historie: eigenes Dashboard-Universum aus der lokalen SQLite-Datenbank, nicht Stockbee direkt.
+- Swing-Lab-Research: 2005-01-07 bis 2026-05-05, 5364 Handelstage, ca. 1244 aktuelle S&P-1500-Titel.
 - Warmup-Caveat: Die ersten ca. 200 Handelstage sind fuer SMA200/52W-Logik weniger belastbar.
 - Universums-Caveat: Die Historie ist nur so gut wie das aktuelle Aktienuniversum und kann Survivorship Bias enthalten.
+- Primaeres Swing-Lab-Artefakt: `Trading/02_Swing-Lab/artifacts/2026-05-15_breadth_composite_research.csv`.
+
+## Swing-Lab-Ergebnis vom 2026-05-15
+
+Die laengere Analyse bestaetigt die Arbeitslesart, aber mit einer wichtigen Schaerfung:
+Der Composite ist kein simples "negativ schlecht, positiv gut"-Signal. Der robusteste Befund
+ist das **Healing-Regime** nach einer beschaedigten Marktphase.
+
+Regime-Definition im Dashboard:
+
+- `Damaged`: 5D-Composite < 0 oder mindestens 3 Tage in Folge Composite < 0.
+- `Healing`: 1 bis 10 Handelstage nach Ende von Damaged, sofern der 5D-Composite wieder > 0 liegt.
+- `Weakening`: 5D-Composite > 0, aber ueber 5 Handelstage um mindestens 4 Punkte gefallen.
+- `Positive`: 5D-Composite > 3.
+- `Other`: kein klares Regime.
+
+Research-Lesart:
+
+- `Healing` ist konstruktivster Kontext fuer Pullback-Setups.
+- `Weakening` ist ein Vorsichtssignal, kein Verkaufssignal.
+- `Damaged` zeigt Mean-Reversion-Potenzial, braucht aber SPY-Trendkontext.
+- In echtem Baerenmarkt-Kontext, insbesondere SPY unter SMA200 und Drawdown >= 20%, ist der Composite als Kaufsignal blind.
+- Der getestete pauschale Filter B wurde im Holdout verworfen; das Dashboard sollte deshalb keine harte Damaged-Ausschlussregel erzwingen.
+
+## Rueckfluss ins Dashboard
+
+Stand 2026-05-16 ist die Regime-Definition in der Breadth-Detailseite umgesetzt:
+
+- die Composite-Box zeigt neben dem Punktwert ein Regime-Label,
+- der Tooltip zeigt den 5D-Composite,
+- der kurze Readout erklaert die operative Lesart des aktuellen Regimes,
+- die Heatmap-Historie behaelt weiterhin den Tages-Composite als numerische Spalte.
+
+Bewusst nicht umgesetzt wurde ein harter Trading-Filter. Die Research-Erkenntnis wird als Kontext angezeigt, nicht als automatisches Entry-/Exit-Signal.
 
 ## Beobachtung
 

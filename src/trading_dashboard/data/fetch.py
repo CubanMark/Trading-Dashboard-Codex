@@ -7,10 +7,25 @@ import numpy as np
 import pandas as pd
 
 from ..config import INDEX_SYMBOLS, SECTOR_ETFS, SYMBOL_SECTORS, Settings
-from .storage import log_quality, log_run, replace_actions, replace_extreme_return_events, replace_prices, replace_sentiment_rows, upsert_symbols
+from .storage import (
+    has_price_history,
+    latest_price_dates,
+    log_quality,
+    log_run,
+    replace_actions,
+    replace_extreme_return_events,
+    replace_prices,
+    replace_sentiment_rows,
+    read_actions,
+    read_prices,
+    upsert_actions,
+    upsert_prices,
+    upsert_symbols,
+)
 from .universe import load_equity_universe
 
 COMMON_SPLIT_RATIOS = (2.0, 3.0, 4.0, 5.0, 10.0)
+INCREMENTAL_OVERLAP_DAYS = 10
 
 
 def fetch_prices(settings: Settings, use_mock: bool = False) -> None:
@@ -24,18 +39,49 @@ def fetch_prices(settings: Settings, use_mock: bool = False) -> None:
         fetch_sentiment(settings.db_path, settings.years, use_mock=True)
         return
 
+    had_existing_history = has_price_history(settings.db_path)
+    existing_yfinance_dates = latest_price_dates(settings.db_path, settings.all_price_symbols, source="yfinance")
     try:
-        prices, actions = yfinance_prices(settings.all_price_symbols, settings.years)
+        prices, actions = yfinance_prices(
+            settings.all_price_symbols,
+            settings.years,
+            latest_dates=existing_yfinance_dates,
+        )
     except Exception as exc:  # pragma: no cover - depends on network/provider
-        log_run(settings.db_path, "fetch", "warning", f"yfinance failed: {exc}. Falling back to mock data.")
+        if had_existing_history:
+            log_run(settings.db_path, "fetch", "warning", f"yfinance failed: {exc}. Keeping existing price history.")
+            log_quality(settings.db_path, "fetch_source", "warning", "Kept existing price history after yfinance failure")
+            fetch_sentiment(settings.db_path, settings.years, use_mock=False)
+            return
+        log_run(settings.db_path, "fetch", "warning", f"yfinance failed: {exc}. Falling back to mock data because DB is empty.")
         prices, actions = mock_prices(settings.all_price_symbols, settings.years)
         source = "mock-fallback"
     else:
         source = "yfinance"
 
-    replacement_symbols = settings.all_price_symbols if source == "mock-fallback" else fetched_symbols(prices)
-    replace_prices(settings.db_path, prices, source, replacement_symbols)
-    replace_actions(settings.db_path, actions, source, replacement_symbols)
+    if source == "mock-fallback":
+        replace_prices(settings.db_path, prices, source, settings.all_price_symbols)
+        replace_actions(settings.db_path, actions, source, settings.all_price_symbols)
+    else:
+        bootstrap_symbols = [symbol for symbol in fetched_symbols(prices) if symbol not in existing_yfinance_dates]
+        if bootstrap_symbols:
+            replace_prices(settings.db_path, prices[prices["symbol"].isin(bootstrap_symbols)], source, bootstrap_symbols)
+            replace_actions(settings.db_path, actions[actions["symbol"].isin(bootstrap_symbols)] if not actions.empty else actions, source, bootstrap_symbols)
+        incremental_prices = prices[~prices["symbol"].isin(bootstrap_symbols)]
+        incremental_actions = actions[~actions["symbol"].isin(bootstrap_symbols)] if not actions.empty else actions
+        upsert_prices(settings.db_path, incremental_prices, source)
+        upsert_actions(settings.db_path, incremental_actions, source)
+        log_quality(
+            settings.db_path,
+            "incremental_fetch",
+            "ok",
+            (
+                f"Loaded {len(prices)} price rows for {len(fetched_symbols(prices))} symbols from yfinance; "
+                f"{len(bootstrap_symbols)} bootstrap/full symbols"
+            ),
+        )
+        prices = read_prices(settings.db_path, settings.all_price_symbols)
+        actions = read_actions(settings.db_path, settings.all_price_symbols)
     quality_check_prices(settings, prices, actions, source)
     fetch_sentiment(settings.db_path, settings.years, use_mock=(source == "mock-fallback"))
 
@@ -138,32 +184,51 @@ def symbol_row(symbol: str, name: str, asset_class: str, sector: str | None, ind
     }
 
 
-def yfinance_prices(symbols: list[str], years: int, batch_size: int = 80) -> tuple[pd.DataFrame, pd.DataFrame]:
+def yfinance_prices(
+    symbols: list[str],
+    years: int,
+    batch_size: int = 80,
+    latest_dates: dict[str, str] | None = None,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
     import yfinance as yf
 
-    start = date.today() - timedelta(days=int(years * 365.25) + 80)
     price_frames: list[pd.DataFrame] = []
     action_rows: list[dict] = []
-    for batch in chunks(symbols, batch_size):
-        try:
-            batch_prices, batch_actions = yfinance_batch(yf, batch, start)
-        except Exception:
-            batch_prices, batch_actions = [], []
-        price_frames.extend(batch_prices)
-        action_rows.extend(batch_actions)
-    fetched = {str(frame["symbol"].iloc[0]) for frame in price_frames if not frame.empty}
-    missing_after_batches = [symbol for symbol in symbols if symbol not in fetched]
-    for symbol in missing_after_batches:
-        try:
-            retry_prices, retry_actions = yfinance_batch(yf, [symbol], start)
-        except Exception:
-            retry_prices, retry_actions = [], []
-        if retry_prices:
-            price_frames.extend(retry_prices)
-            action_rows.extend(retry_actions)
+    for start, start_symbols in symbols_by_fetch_start(symbols, years, latest_dates).items():
+        for batch in chunks(start_symbols, batch_size):
+            try:
+                batch_prices, batch_actions = yfinance_batch(yf, batch, start)
+            except Exception:
+                batch_prices, batch_actions = [], []
+            price_frames.extend(batch_prices)
+            action_rows.extend(batch_actions)
+        fetched = {str(frame["symbol"].iloc[0]) for frame in price_frames if not frame.empty}
+        missing_after_batches = [symbol for symbol in start_symbols if symbol not in fetched]
+        for symbol in missing_after_batches:
+            try:
+                retry_prices, retry_actions = yfinance_batch(yf, [symbol], start)
+            except Exception:
+                retry_prices, retry_actions = [], []
+            if retry_prices:
+                price_frames.extend(retry_prices)
+                action_rows.extend(retry_actions)
     if not price_frames:
         raise RuntimeError("No usable yfinance price frames")
     return pd.concat(price_frames, ignore_index=True), pd.DataFrame(action_rows)
+
+
+def symbols_by_fetch_start(symbols: list[str], years: int, latest_dates: dict[str, str] | None = None) -> dict[date, list[str]]:
+    latest_dates = latest_dates or {}
+    full_start = date.today() - timedelta(days=int(years * 365.25) + 80)
+    grouped: dict[date, list[str]] = {}
+    for symbol in symbols:
+        latest = latest_dates.get(symbol)
+        if latest:
+            start = pd.Timestamp(latest).date() - timedelta(days=INCREMENTAL_OVERLAP_DAYS)
+        else:
+            start = full_start
+        grouped.setdefault(start, []).append(symbol)
+    return grouped
 
 
 def fetched_symbols(prices: pd.DataFrame) -> list[str]:
