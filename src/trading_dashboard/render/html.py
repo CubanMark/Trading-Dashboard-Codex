@@ -137,6 +137,7 @@ def load_render_data(settings: Settings) -> dict:
         row["history"] = history_by_symbol.get(row["symbol"], [])
     breadth_rows = annotate_breadth_regimes([dict(row) for row in reversed(breadth)])
     breadth_composite_chart = breadth_composite_chart_rows(breadth_rows, [dict(row) for row in spy_history])
+    spy_context = _spy_trend_context([dict(row) for row in spy_history])
     return {
         "latest_date": latest_metric or "No data",
         "metrics": [dict(row) for row in metrics],
@@ -151,6 +152,7 @@ def load_render_data(settings: Settings) -> dict:
         "sources": [dict(row) for row in sources],
         "operation": operation_summary([dict(row) for row in sources], [dict(row) for row in quality], active_equities, priced_equities),
         "indexes": sort_index_rows(index_rows),
+        "spy_context": spy_context,
         "sentiment": [dict(row) for row in sentiment],
         "risk_history": _group_price_rows(risk_raw),
         "volatility_history": _group_price_rows(vol_raw),
@@ -163,6 +165,28 @@ def _group_price_rows(rows: list) -> dict[str, list[dict]]:
     for row in rows:
         result.setdefault(str(row["symbol"]), []).append({"date": str(row["date"]), "close": float(row["close"])})
     return result
+
+
+def _spy_trend_context(spy_history: list[dict]) -> dict:
+    closes = [float(r["close"]) for r in spy_history if r.get("close")]
+    if len(closes) < 20:
+        return {}
+    close = closes[-1]
+    sma200 = sum(closes[-200:]) / len(closes[-200:]) if len(closes) >= 200 else sum(closes) / len(closes)
+    high_52w = max(closes[-252:]) if len(closes) >= 252 else max(closes)
+    above_sma200 = close >= sma200
+    pct_vs_sma200 = close / sma200 - 1
+    drawdown_52w = close / high_52w - 1
+    no_long_context = (not above_sma200) and drawdown_52w <= -0.20
+    return {
+        "close": close,
+        "sma200": sma200,
+        "above_sma200": above_sma200,
+        "pct_vs_sma200": pct_vs_sma200,
+        "high_52w": high_52w,
+        "drawdown_52w": drawdown_52w,
+        "no_long_context": no_long_context,
+    }
 
 
 def sort_index_rows(rows: list[dict]) -> list[dict]:
@@ -304,7 +328,7 @@ def render_detail(slug: str, title: str, data: dict) -> str:
     elif slug == "breadth":
         body = (
             f"<h1>{title}</h1>"
-            f"{render_breadth_kpis(data.get('breadth', []))}"
+            f"{render_breadth_kpis(data.get('breadth', []), data.get('spy_context', {}))}"
             f"{render_breadth_composite_chart(data.get('breadth_composite_chart', []))}"
             f"{render_breadth_history(data.get('breadth', []))}"
         )
@@ -437,6 +461,9 @@ def page(title: str, body: str) -> str:
     .regime-weakening {{ color: #9f5a00; background: #fff5e1; border-color: #e7c785; }}
     .regime-damaged {{ color: #be4f5c; background: #fff1f3; border-color: #efc5ca; }}
     .regime-other {{ color: #334155; background: #f8fafc; }}
+    .regime-spy-above {{ color: #0f766e; background: #eefaf6; border-color: #b9ddd4; }}
+    .regime-spy-below {{ color: #9f5a00; background: #fff5e1; border-color: #e7c785; }}
+    .regime-no-long-context {{ color: #be4f5c; background: #fff1f3; border-color: #efc5ca; font-weight: 900; }}
     .composite-readout {{ margin: -4px 0 0; color: var(--muted); font-size: 13px; line-height: 1.35; }}
     .composite-bar {{ position: relative; height: 18px; border-radius: 999px; background: linear-gradient(90deg, #e98b94 0%, #f7d9dd 25%, #f7f8fa 45%, #f7f8fa 55%, #d8f0e9 75%, #8fd6c3 100%); border: 1px solid var(--line); }}
     .composite-zero {{ position: absolute; left: 50%; top: -4px; bottom: -4px; width: 1px; background: rgba(24,32,42,.45); }}
@@ -892,7 +919,7 @@ def metric_status_from_speculative(up_count: int, down_count: int) -> str:
     return metric_status_from_heat(speculative_status(up_count, down_count))
 
 
-def render_breadth_kpis(rows: list[dict]) -> str:
+def render_breadth_kpis(rows: list[dict], spy_context: dict | None = None) -> str:
     if not rows:
         return "<p>No breadth KPI data available yet.</p>"
     latest = rows[-1]
@@ -936,7 +963,7 @@ def render_breadth_kpis(rows: list[dict]) -> str:
         + "</div>"
         "<h2>Momentum Breadth</h2>"
         + render_momentum_kpis(rows)
-        + render_breadth_composite(latest)
+        + render_breadth_composite(latest, spy_context or {})
     )
 
 
@@ -989,7 +1016,7 @@ def render_momentum_kpis(rows: list[dict]) -> str:
     return "<div class='cards breadth-kpis momentum-kpis'>" + "".join(cards) + "</div>"
 
 
-def render_breadth_composite(row: dict) -> str:
+def render_breadth_composite(row: dict, spy_context: dict | None = None) -> str:
     score = int(row.get("composite_score", breadth_composite_score(row)))
     marker_left = (score + 18) / 36 * 100
     label = f"+{score}" if score > 0 else str(score)
@@ -999,6 +1026,7 @@ def render_breadth_composite(row: dict) -> str:
     regime_class = f"regime-{regime.lower()}" if regime in {"Positive", "Healing", "Weakening", "Damaged", "Other"} else "regime-other"
     readout = composite_regime_readout(regime)
     average_label = "N/A" if composite_5d is None else f"{float(composite_5d):+.1f}"
+    spy_pill = _render_spy_context_pill(spy_context or {})
     return (
         "<section class='breadth-composite'>"
         "<div class='composite-head'><h2 class='composite-title'>Breadth Composite"
@@ -1006,6 +1034,7 @@ def render_breadth_composite(row: dict) -> str:
         "</h2>"
         "<div class='composite-status'>"
         f"<span class='regime-pill {esc(regime_class)}' title='5D Composite: {esc(average_label)}'>{esc(regime)}</span>"
+        f"{spy_pill}"
         f"<div class='composite-score {tone}'>{esc(label)}</div></div></div>"
         f"<p class='composite-readout'>{esc(readout)}</p>"
         "<div class='composite-bar' role='img' aria-label='Breadth Composite range from minus 18 to plus 18'>"
@@ -1015,6 +1044,21 @@ def render_breadth_composite(row: dict) -> str:
         "<div class='composite-scale'><span>-18</span><span>0</span><span>+18</span></div>"
         "</section>"
     )
+
+
+def _render_spy_context_pill(ctx: dict) -> str:
+    if not ctx:
+        return ""
+    above = ctx.get("above_sma200", True)
+    pct = ctx.get("pct_vs_sma200", 0.0)
+    dd = ctx.get("drawdown_52w", 0.0)
+    no_long = ctx.get("no_long_context", False)
+    tooltip = f"SPY {pct:+.1%} vs SMA200 | {dd:.1%} from 52W high"
+    if no_long:
+        return f"<span class='regime-pill regime-no-long-context' title='{esc(tooltip)}'>NO LONG CONTEXT</span>"
+    if above:
+        return f"<span class='regime-pill regime-spy-above' title='{esc(tooltip)}'>SPY ABOVE SMA200</span>"
+    return f"<span class='regime-pill regime-spy-below' title='{esc(tooltip)}'>SPY BELOW SMA200</span>"
 
 
 def composite_regime_readout(regime: str) -> str:
